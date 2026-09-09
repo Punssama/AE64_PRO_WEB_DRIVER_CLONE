@@ -160,6 +160,9 @@
   .readout { display: flex; gap: 22px; flex-wrap: wrap; align-items: baseline; }
   .readout b { font-weight: normal; font-size: 22px; }
   .readout .muted { color: var(--muted); }
+  .readout .ok { color: var(--ink); background: var(--desk); padding: 0 5px; }
+  .readout .bad { color: var(--accent); background: var(--ink); padding: 0 5px; }
+  #ttChecks { margin-top: 6px; }
   /* Calibration rewrites every key's stored axis data, so its screen is styled to be
      read before it is clicked, not after. */
   .warn { border: 2px solid var(--ink); background: var(--accent); padding: 7px 10px; margin: 0 0 11px; }
@@ -275,13 +278,9 @@
     </div>
 
     <div class="view" id="view-traveltest" hidden>
-      <p class="hint">Press keys and watch them fill above. Read-only. Select a key for exact figures.</p>
-      <div class="readout">
-        <span><span class="muted">Key</span> <b id="ttKey">--</b></span>
-        <span><span class="muted">Travel</span> <b id="ttMm">--</b></span>
-        <span><span class="muted">Peak</span> <b id="ttPeak">--</b></span>
-        <span><span class="muted">Raw</span> <b id="ttRaw">--</b></span>
-      </div>
+      <p class="hint" id="ttHint">Select a key and press it a few times - slowly is more accurate. Each press narrows the reading.</p>
+      <div class="readout" id="ttNow"></div>
+      <div class="readout" id="ttChecks"></div>
     </div>
 
     <div class="view" id="view-log" hidden><div id="log"></div></div>
@@ -867,33 +866,115 @@ const KB_ROWS = [...new Set(KEY_LAYOUT.map(([rc]) => Number(rc.split('-')[0])))]
 // Scaling the fill by this rather than a constant keeps it right whatever unit Route
 // is in, as long as it shares units with axisRangeMax - both come from the axis subsystem.
 const keyTravel = new Map();
-let ttPeak = 0, ttPeakKey = null;
+// Verification state for the selected key. The point of the travel test is not to watch
+// a number move - it is to prove the key actually fires where the settings say it does.
+// Absolute depths answer "where does it fire" (Normal mode); the deltas answer "how far
+// must I move to re-trigger" (Rapid Trigger). Every one is an intersected interval, never
+// a single sample, because one fast press tells you almost nothing on its own.
+const TT_FIELDS = ['absPress', 'absRelease', 'first', 'rePress', 'rel'];
+const tt = { rc: null, pressed: false, prevRoute: 0, prev2Route: 0, shallowest: 0, deepest: 0, count: 0 };
 
-function paintTravelRow(row, data) {
-  for (let col = 0; col < data.length; col++) {
-    const rc = `${row}-${col}`;
-    const el = keyEl.get(rc);
-    if (!el) continue;
-    const full = keyTravel.get(rc) || 3390;
-    const pct = Math.max(0, Math.min(100, (data[col] / full) * 100));
-    el.querySelector('.lvl').style.height = pct + '%';
-    if (rc === selected.values().next().value) showTravelReadout(rc, data[col], full);
-  }
+function resetTT(rc) {
+  Object.assign(tt, { rc, pressed: false, prevRoute: 0, prev2Route: 0, shallowest: 0, deepest: 0, count: 0 });
+  for (const f of TT_FIELDS) tt[f] = null;
 }
 
-function showTravelReadout(rc, raw, full) {
-  if (rc !== ttPeakKey) { ttPeakKey = rc; ttPeak = 0; }
-  ttPeak = Math.max(ttPeak, raw);
-  document.getElementById('ttKey').textContent = KEY_LABEL.get(rc) || rc;
-  document.getElementById('ttMm').textContent = (raw / 1000).toFixed(2) + ' mm';
-  document.getElementById('ttPeak').textContent = (ttPeak / 1000).toFixed(2) + ' mm';
-  document.getElementById('ttRaw').textContent = `${raw} / ${full}`;
-  const live = document.getElementById('liveMark');
-  if (live) {
-    live.hidden = false;
-    live.style.top = Math.max(0, Math.min(100, (raw / full) * 100)) + '%';
-    live.querySelector('span').textContent = 'now ' + (raw / 1000).toFixed(2);
+// All we ever learn from one press is that the switching point lies somewhere between
+// the last two samples. Press fast and that window is wide; press again and it lands
+// somewhere else. The true point is in every window, so intersect them - each press
+// tightens the answer instead of the last one overwriting it.
+function narrow(iv, a, b) {
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  if (!iv) return [lo, hi];
+  const nlo = Math.max(iv[0], lo), nhi = Math.min(iv[1], hi);
+  // No overlap means the key is not switching consistently (or the setting changed):
+  // trust the newest reading rather than reporting an impossible range.
+  return nlo <= nhi ? [nlo, nhi] : [lo, hi];
+}
+const mid = iv => iv ? (iv[0] + iv[1]) / 2 : null;
+const halfWidth = iv => iv ? (iv[1] - iv[0]) / 2 : 0;
+
+// Each cycle reads STATUS first, then travel. That ordering matters: the travel sample
+// taken after a status change is known to be past the switching point, while the sample
+// from two cycles back is known to be before it. Those two bracket the real value.
+// Reading travel first (the original order) let the "after" sample be taken before the
+// key had actually switched, which locked the first-trigger reading onto 0.00mm.
+function feedTT(route, status) {
+  const down = status !== 0;
+  if (down !== tt.pressed) {
+    const before = tt.prev2Route;
+    // The real switching point lies between this sample and the last one, so take the
+    // midpoint rather than pretending the sample we happened to catch is exact.
+    if (down) {
+      tt.count++;
+      tt.absPress = narrow(tt.absPress, before, route);
+      // A press starting from the top of the travel is a first trigger; one starting
+      // part-way down is Rapid Trigger re-arming, and only its DEPTH CHANGE matters.
+      if (tt.shallowest < 50) tt.first = narrow(tt.first, before, route);
+      else tt.rePress = narrow(tt.rePress, before - tt.shallowest, route - tt.shallowest);
+      tt.deepest = route;
+    } else {
+      tt.absRelease = narrow(tt.absRelease, before, route);
+      tt.rel = narrow(tt.rel, tt.deepest - before, tt.deepest - route);
+      tt.shallowest = route;
+    }
+    tt.pressed = down;
   }
+  if (tt.pressed) tt.deepest = Math.max(tt.deepest, route);
+  else tt.shallowest = Math.min(tt.shallowest, route);
+  tt.prev2Route = tt.prevRoute;
+  tt.prevRoute = route;
+}
+
+const MM = v => (v / 1000).toFixed(2);
+// Sampling spread measured on real presses was about 0.03mm, so 0.1mm passes anything
+// that is genuinely on target while still catching a setting that did not take.
+const TT_TOL = 100;
+
+function check(label, measured, set, err) {
+  if (measured === null) return `<span><span class="muted">${label}</span> <b>--</b></span>`;
+  const diff = measured - set * 1000;
+  // Only call it off-spec when it misses by more than the measurement itself can resolve.
+  const ok = Math.abs(diff) <= Math.max(TT_TOL, err || 0);
+  const pm = err > 40 ? ` &plusmn;${MM(err)}` : '';
+  return `<span><span class="muted">${label}</span> <b>${MM(measured)}${pm}</b>`
+       + `<span class="muted"> set ${set.toFixed(2)}</span> `
+       + `<b class="${ok ? 'ok' : 'bad'}">${ok ? 'OK' : 'OFF'}</b></span>`;
+}
+
+function renderTT(route) {
+  const rc = tt.rc;
+  if (!rc) {
+    document.getElementById('ttNow').innerHTML = '<span class="muted">No key selected.</span>';
+    document.getElementById('ttChecks').innerHTML = '';
+    return;
+  }
+  const rtOn = rtMode === 1;
+  document.getElementById('ttNow').innerHTML =
+      `<span><span class="muted">Key</span> <b>${KEY_LABEL.get(rc) || rc}</b></span>`
+    + `<span><span class="muted">Mode</span> <b>${rtOn ? 'Rapid Trigger' : 'Normal'}</b></span>`
+    + `<span><span class="muted">Now</span> <b>${MM(route)} mm</b></span>`
+    + `<span><b class="${tt.pressed ? 'ok' : 'muted'}">${tt.pressed ? 'PRESSED' : 'released'}</b></span>`
+    + `<span><span class="muted">Presses</span> <b>${tt.count}</b></span>`;
+  const num = id => parseFloat(document.getElementById(id).value) || 0;
+  const row = (label, iv, set) => check(label, mid(iv), set, halfWidth(iv));
+  // The top dead zone is travel the firmware ignores, so a trigger point set shallower
+  // than it can never be reached - the key fires at the dead-zone edge instead. Verified
+  // on hardware: with dead zone 0.35 and first touch 0.10, the key fired at 0.345.
+  const dead = num('pressDeadStroke');
+  const eff = set => Math.max(set, dead);
+  const trigger = rtOn ? num('rtFirstTouch') : num('normalPress');
+  document.getElementById('ttChecks').innerHTML = rtOn
+    ? row('First trigger', tt.first, eff(trigger))
+      + row('Re-press after', tt.rePress, num('rtPress'))
+      + row('Release after', tt.rel, num('rtRelease'))
+    : row('Fires at', tt.absPress, eff(trigger))
+      + row('Resets at', tt.absRelease, eff(trigger));
+  document.getElementById('ttHint').innerHTML = dead > trigger
+    ? `<b>Top dead zone ${dead.toFixed(2)}mm is deeper than your ${rtOn ? 'first trigger' : 'actuation'} `
+      + `setting ${trigger.toFixed(2)}mm, so the key really fires at ${dead.toFixed(2)}mm.</b> `
+      + `Lower the dead zone to actually get ${trigger.toFixed(2)}mm.`
+    : 'Select a key and press it a few times - slowly is more accurate. Each press narrows the reading.';
 }
 
 function clearTravelPaint() {
@@ -902,20 +983,59 @@ function clearTravelPaint() {
   if (live) live.hidden = true;
 }
 
-// A self-paced loop rather than setInterval: each pass waits for the previous reads to
-// land, so a slow device throttles the poll instead of stacking requests behind it.
-let travelRunning = false;
+function paintKeyFill(rc, raw) {
+  const el = keyEl.get(rc);
+  if (!el) return;
+  const full = keyTravel.get(rc) || 3390;
+  el.querySelector('.lvl').style.height = Math.max(0, Math.min(100, (raw / full) * 100)) + '%';
+}
+
+function paintTravelRow(row, data) {
+  for (let col = 0; col < data.length; col++) paintKeyFill(`${row}-${col}`, data[col]);
+}
+
+// The watched key's row is read every pass (travel AND status, so edges are caught with
+// as little lag as possible); the other rows take turns, one per pass, just to keep the
+// rest of the board's fill alive without blunting the measurement that matters.
+let travelRunning = false, rrRow = 0;
 async function travelLoop() {
   while (travelRunning) {
-    // Yield to auto-save rather than queueing five reads ahead of the user's own edit.
     if (device && !writing) {
-      for (const row of KB_ROWS) {
-        if (!travelRunning) break;
-        const r = await getAxisRow(AXIS_MODE.Route, row);
-        if (r) paintTravelRow(row, r.data);
+      const rc = selected.values().next().value || null;
+      if (rc !== tt.rc) resetTT(rc);
+      if (rc) {
+        const [row, col] = rc.split('-').map(Number);
+        const ks = await getAxisRow(AXIS_MODE.KeyStatus, row, 300);
+        const rt = await getAxisRow(AXIS_MODE.Route, row, 300);
+        if (rt && ks) {
+          paintTravelRow(row, rt.data);
+          feedTT(rt.data[col], ks.data[col]);
+          renderTT(rt.data[col]);
+          const live = document.getElementById('liveMark');
+          if (live) {
+            const full = keyTravel.get(rc) || 3390;
+            live.hidden = false;
+            live.style.top = Math.max(0, Math.min(100, (rt.data[col] / full) * 100)) + '%';
+            live.querySelector('span').textContent = 'now ' + MM(rt.data[col]);
+          }
+        }
+        // Other rows only every 10th pass: sample rate on the watched key is what
+        // decides how tightly the switching point can be pinned down.
+        const other = KB_ROWS[(rrRow++ / 10 | 0) % KB_ROWS.length];
+        if (rrRow % 10 === 0 && other !== row) {
+          const o = await getAxisRow(AXIS_MODE.Route, other, 300);
+          if (o) paintTravelRow(other, o.data);
+        }
+      } else {
+        renderTT(0);
+        for (const row of KB_ROWS) {
+          if (!travelRunning) break;
+          const r = await getAxisRow(AXIS_MODE.Route, row, 300);
+          if (r) paintTravelRow(row, r.data);
+        }
       }
     }
-    await new Promise(r => setTimeout(r, 40));
+    await new Promise(r => setTimeout(r, tt.rc ? 0 : 8));
   }
   clearTravelPaint();
 }
