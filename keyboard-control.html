@@ -937,32 +937,46 @@ function setTravelTest(on) {
 // the second, because this overwrites every key's stored calibration.
 let calibrating = false, calibDumped = false;
 
+// Progress is driven by live TRAVEL, not by the calibration-state read: travel is
+// verified working, while what [4,3,2,row] means is still unconfirmed - and relying on
+// it left this screen showing nothing at all, with no way to tell which keys were done.
+const calPressed = new Set();
+
 async function pollCalibrationProgress() {
   while (calibrating) {
     if (device && !writing) {
-      let done = 0, total = 0;
       for (const row of KB_ROWS) {
         if (!calibrating) break;
-        const r = await getAxisRow(AXIS_MODE.Calibrate, row);
+        const r = await getAxisRow(AXIS_MODE.Route, row);
         if (!r) continue;
-        // The meaning of these values is the one thing not pinned down from the vendor
-        // source, so dump one row once rather than trusting the >0 reading below.
-        if (!calibDumped) { calibDumped = true; log(`Calibrate row ${row} raw: [${r.data.slice(0, 16).join(',')}]`); }
         for (let col = 0; col < r.data.length; col++) {
-          const el = keyEl.get(`${row}-${col}`);
+          const rc = `${row}-${col}`;
+          const el = keyEl.get(rc);
           if (!el) continue;
-          total++;
-          const ok = r.data[col] > 0;
-          if (ok) done++;
-          el.classList.toggle('done', ok);
+          const full = keyTravel.get(rc) || 3390;
+          el.querySelector('.lvl').style.height = Math.max(0, Math.min(100, (r.data[col] / full) * 100)) + '%';
+          // Counts as learned once it has actually reached the bottom of its travel -
+          // a light tap is not what calibration needs.
+          if (r.data[col] >= full * 0.9) {
+            calPressed.add(rc);
+            el.classList.add('done');
+          }
         }
       }
+      // One diagnostic sample of the unverified calibration-state read, so its format
+      // can still be pinned down from a real run.
+      if (!calibDumped) {
+        const c = await getAxisRow(AXIS_MODE.Calibrate, 3);
+        if (c) { calibDumped = true; log(`Calibrate row 3 raw: [${c.data.slice(0, 14).join(',')}]`); }
+      }
       if (calibrating) {
-        document.getElementById('calState').textContent =
-          `Running - ${done}/${total} keys learned. Press every key fully down, then release.`;
+        const left = KEY_LAYOUT.length - calPressed.size;
+        document.getElementById('calState').textContent = left
+          ? `${calPressed.size} / ${KEY_LAYOUT.length} done - ${left} key${left === 1 ? '' : 's'} still to press.`
+          : `All ${KEY_LAYOUT.length} keys done. Press Finish.`;
       }
     }
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r => setTimeout(r, 50));
   }
 }
 
@@ -981,6 +995,8 @@ document.getElementById('calStart').onclick = async () => {
   const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.CalibrationSetting, CALIB.Open]);
   if (!res) { log('Calibration: no response to start.'); document.getElementById('calState').textContent = 'Could not start - no response.'; return; }
   calibrating = true;
+  calPressed.clear();
+  for (const el of keyEl.values()) el.classList.remove('done');
   btn.hidden = true;
   document.getElementById('calFinish').hidden = false;
   log('Calibration STARTED - press every key fully down and release.');
@@ -993,7 +1009,10 @@ document.getElementById('calFinish').onclick = async () => {
   document.getElementById('calFinish').hidden = true;
   document.getElementById('calStart').hidden = false;
   for (const el of keyEl.values()) el.classList.remove('done');
-  document.getElementById('calState').textContent = res ? 'Calibration finished.' : 'Sent finish, but no response.';
+  clearTravelPaint();
+  document.getElementById('calState').textContent = res
+    ? `Calibration finished - ${calPressed.size} keys were pressed.`
+    : 'Sent finish, but no response.';
   log(res ? 'Calibration FINISHED.' : 'Calibration finish: no response.');
   // Re-read: travel ranges have just changed, so anything on screen is stale.
   await fillFormFrom(selected.values().next().value);
