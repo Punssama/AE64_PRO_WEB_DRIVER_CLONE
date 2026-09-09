@@ -40,12 +40,6 @@
   .titlebar { flex: none; display: flex; align-items: center; gap: 14px; background: var(--accent); border-bottom: 2px solid var(--ink); padding: 4px 12px; }
   .titlebar h1 { margin: 0; font-size: 20px; font-weight: normal; letter-spacing: .06em; }
   .titlebar .spacer { flex: 1; }
-  /* The device's own 4 stored configs. They live in the title bar because they are
-     device-wide state, like the connection - not a per-key setting. */
-  #configBar { display: flex; align-items: center; gap: 5px; }
-  #configBar .barlabel { color: var(--ink); opacity: .7; letter-spacing: .08em; }
-  .cfgbtn { padding: 2px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cfgbtn.active, .cfgbtn.active:hover { background: var(--ink); color: var(--accent); }
   #status { margin: 0; }
   #status::before { content: '[ '; }
   #status::after { content: ' ]'; }
@@ -58,6 +52,12 @@
   #saveState.busy::before { content: ''; }
 
   .sidebar { display: flex; flex-direction: column; gap: 7px; min-height: 0; }
+  /* The device's own 4 stored configs. First thing in the sidebar because it is the
+     widest scope on screen: every view below it edits whichever config is picked here. */
+  #configPicker { display: flex; flex-direction: column; gap: 3px; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 2px solid var(--ink); }
+  #configPicker label { font-size: 15px; color: var(--ink); opacity: .75; letter-spacing: .09em; }
+  #configSelect { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--accent); color: var(--ink); font-family: var(--term); font-size: 17px; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
+  #configSelect:disabled { background: var(--surface); cursor: not-allowed; }
   .navbtn { width: 100%; text-align: left; }
   .navbtn.active { background: var(--ink); color: var(--accent); }
   .navbtn.active:hover { background: var(--ink); }
@@ -166,7 +166,6 @@
 
 <header class="titlebar">
   <h1>AE64 PRO TUNER</h1>
-  <div id="configBar"></div>
   <span class="spacer"></span>
   <p id="status">Not connected</p>
   <button id="connect">Connect keyboard</button>
@@ -175,6 +174,10 @@
 <div class="appbody">
 
   <nav class="sidebar">
+    <div id="configPicker">
+      <label for="configSelect">CONFIG</label>
+      <select id="configSelect" disabled><option>--</option></select>
+    </div>
     <button class="navbtn" data-view="performance">Performance</button>
     <button class="navbtn" data-view="log">Log</button>
     <button class="navbtn" data-view="rate">Polling rate</button>
@@ -656,20 +659,22 @@ function configLabel(id) {
   return configNames.get(id) || `Config ${id + 1}`;
 }
 
-function renderConfigBar() {
-  const bar = document.getElementById('configBar');
-  bar.innerHTML = '';
-  if (!configCount) return;
-  bar.append(Object.assign(document.createElement('span'), { className: 'barlabel', textContent: 'CONFIG' }));
-  for (let i = 0; i < configCount; i++) {
-    const b = document.createElement('button');
-    b.className = 'cfgbtn' + (i === currentConfig ? ' active' : '');
-    b.textContent = configLabel(i);
-    b.title = configLabel(i);
-    b.onclick = () => switchConfig(i);
-    bar.appendChild(b);
+function renderConfigPicker() {
+  const sel = document.getElementById('configSelect');
+  sel.innerHTML = '';
+  if (!configCount) {
+    sel.append(new Option('--', ''));
+    sel.disabled = true;
+    return;
   }
+  for (let i = 0; i < configCount; i++) sel.append(new Option(configLabel(i), String(i)));
+  // Always driven from currentConfig, never from what was clicked: a refused switch
+  // has to snap the dropdown back to the config the device is actually on.
+  sel.value = String(currentConfig);
+  sel.disabled = false;
 }
+
+document.getElementById('configSelect').onchange = e => switchConfig(Number(e.target.value));
 
 async function loadConfigs() {
   const list = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.List]);
@@ -677,7 +682,7 @@ async function loadConfigs() {
   const cur = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.Read]);
   currentConfig = cur ? cur[3] : null;
   for (let i = 0; i < configCount; i++) configNames.set(i, await getConfigName(i));
-  renderConfigBar();
+  renderConfigPicker();
   log(`Configs: ${configCount}, active = ${configLabel(currentConfig)}`);
 }
 
@@ -689,9 +694,14 @@ async function switchConfig(id) {
   writeAgain = false;
   saveState('Switching...', true);
   const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.Switch, id]);
-  if (!res) { saveState('Switch failed', true); log(`Config switch to ${id}: no response`); return; }
+  if (!res) {
+    saveState('Switch failed', true);
+    log(`Config switch to ${id}: no response`);
+    renderConfigPicker();
+    return;
+  }
   currentConfig = res[3];
-  renderConfigBar();
+  renderConfigPicker();
   if (res[3] !== id) log(`Config switch: asked for ${id}, device reports ${res[3]}`);
   // Every per-key value on screen belongs to the config we just left, so re-read
   // both the form and every keycap tag rather than showing the old config's numbers.
