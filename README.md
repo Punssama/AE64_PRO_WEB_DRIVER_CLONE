@@ -32,8 +32,8 @@ WebHID is only available in a **secure context**. `https://` and `localhost` qua
 `undefined` and the Connect button cannot work. So serve it over localhost:
 
 ```sh
-git clone https://github.com/Punssama/ae64-pro-tuner.git
-cd ae64-pro-tuner
+git clone https://github.com/Punssama/AE64_PRO_WEB_DRIVER_CLONE.git
+cd AE64_PRO_WEB_DRIVER_CLONE
 python -m http.server 8787
 ```
 
