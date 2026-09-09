@@ -92,6 +92,11 @@
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
   #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 12px; line-height: 1.15; background: var(--ink); color: var(--accent); }
   #kb .kb-key.rt .tag { display: block; }
+  /* Live travel fill, driven by the Travel test poll. Rises from the bottom of the cap. */
+  #kb .kb-key .lvl { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--desk); }
+  #kb .kb-key .cap { position: relative; }
+  /* Calibration progress: a key the firmware has finished learning. */
+  #kb .kb-key.done { background: var(--desk); }
 
   /* The meter sits on an ink field so all three palette colours stay legible on it:
      amber marks where the key fires, green fills the travel above it. */
@@ -110,6 +115,9 @@
   .mark::before { content: ''; position: absolute; left: -4px; right: -4px; top: -3px; height: 6px; background: currentColor; }
   .mark span { position: absolute; left: calc(100% + 10px); transform: translateY(-50%); font-size: 17px; color: var(--ink); white-space: nowrap; }
   .mark span::before { content: '\25B8 '; }
+  /* The live travel marker, distinct from the amber trigger mark it crosses. */
+  .mark.live { color: var(--surface); }
+  .mark.live span { color: var(--muted); }
 
   .field { margin-bottom: 11px; }
   .field label { display: block; font-size: 17px; color: var(--muted); margin-bottom: 3px; }
@@ -149,6 +157,14 @@
      toggle a row of its own cost 51px of the 142px the view has. */
   .fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 20px; align-items: end; }
   .fields .field { margin-bottom: 0; }
+  .readout { display: flex; gap: 22px; flex-wrap: wrap; align-items: baseline; }
+  .readout b { font-weight: normal; font-size: 22px; }
+  .readout .muted { color: var(--muted); }
+  /* Calibration rewrites every key's stored axis data, so its screen is styled to be
+     read before it is clicked, not after. */
+  .warn { border: 2px solid var(--ink); background: var(--accent); padding: 8px 10px; margin: 0 0 12px; }
+  .danger { background: var(--accent); }
+  .danger[data-armed="1"] { background: var(--ink); color: var(--accent); }
   /* The two groups are only there to be shown and hidden - their fields must still be
      items of the grid above, not of a box inside it. */
   #normalFields, #rtFields { display: contents; }
@@ -179,6 +195,8 @@
       <select id="configSelect" disabled><option>--</option></select>
     </div>
     <button class="navbtn" data-view="performance">Performance</button>
+    <button class="navbtn" data-view="traveltest">Travel test</button>
+    <button class="navbtn" data-view="calibration">Calibration</button>
     <button class="navbtn" data-view="log">Log</button>
     <button class="navbtn" data-view="rate">Polling rate</button>
     <button class="navbtn" data-view="light">Lighting</button>
@@ -252,7 +270,25 @@
       </div>
     </div>
 
+    <div class="view" id="view-traveltest" hidden>
+      <p class="hint">Press keys and watch them fill above. Read-only. Select a key for exact figures.</p>
+      <div class="readout">
+        <span><span class="muted">Key</span> <b id="ttKey">--</b></span>
+        <span><span class="muted">Travel</span> <b id="ttMm">--</b></span>
+        <span><span class="muted">Peak</span> <b id="ttPeak">--</b></span>
+        <span><span class="muted">Raw</span> <b id="ttRaw">--</b></span>
+      </div>
+    </div>
+
     <div class="view" id="view-log" hidden><div id="log"></div></div>
+
+    <div class="view" id="view-calibration" hidden>
+      <p class="warn"><b>Replaces the stored calibration on every key.</b> Press every key fully
+        down and release, then Finish. Stopping halfway leaves keys half-learned - just run it again.</p>
+      <p class="hint" id="calState">Not running.</p>
+      <button id="calStart" class="danger" data-armed="0">Start calibration</button>
+      <button id="calFinish" hidden>Finish calibration</button>
+    </div>
 
     <div class="view" id="view-rate" hidden>
         <p class="hint">How often the keyboard reports to the PC. Changing this briefly disconnects and reconnects the keyboard.</p>
@@ -296,12 +332,17 @@
 <script>
 // Protocol reverse-engineered from https://www.xsyd.top/ (own device, WebHID).
 const CATEGORY = { Global: 2, Performance: 4, Lighting: 5 };
-const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5 };
+const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5, CalibrationSetting: 6 };
 // ConfigSwitch's third byte is NOT the QR enum the other commands use: 0/1/2 line up
 // with ReadList/Read/Write, but 3 and 4 are name get/set, which QR has no values for.
 const CFG_OP = { List: 0, Read: 1, Switch: 2, GetName: 3, SetName: 4 };
 const QR = { ReadList: 0, Read: 1, Write: 2 };
-const PERF_SUB = { GetPerformance: 1, SetPerformance: 2 };
+const PERF_SUB = { GetPerformance: 1, SetPerformance: 2, AxisData: 3 };
+// AxisData's third byte picks what to read; the fourth is a ROW, and one packet answers
+// for that whole row - bytes 4..63 are 30 u16LE values, one per column.
+const AXIS_MODE = { ADC: 0, Route: 1, Calibrate: 2, KeyStatus: 3 };
+// Calibration's third byte is an Open/Close flag, not the QR enum other commands use.
+const CALIB = { Open: 0, Close: 1 };
 const LIGHT_SUB = { DirectDrive: 5 };
 const AREA = { Keyboard: 0 };
 
@@ -357,7 +398,13 @@ function renderKeyboard() {
     const [row, col] = rc.split('-').map(Number);
     const btn = document.createElement('div');
     btn.className = 'kb-key';
-    btn.append(label, Object.assign(document.createElement('span'), { className: 'tag', textContent: 'RT' }));
+    btn.append(
+      // .lvl is first and absolutely positioned; .cap and .tag are positioned too and
+      // come later, so they paint over the travel fill without needing z-index.
+      Object.assign(document.createElement('span'), { className: 'lvl' }),
+      Object.assign(document.createElement('span'), { className: 'cap', textContent: label }),
+      Object.assign(document.createElement('span'), { className: 'tag', textContent: 'RT' }),
+    );
     keyEl.set(rc, btn);
     btn.style.left = ((x - KB_MINX) * KB_SCALE + 6) + 'px';
     btn.style.top = ((y - KB_MINY) * KB_SCALE + 6) + 'px';
@@ -401,7 +448,10 @@ async function loadAllModes() {
   for (const [rc] of KEY_LAYOUT) {
     const [row, col] = rc.split('-').map(Number);
     const cur = await getPerformanceRaw(row, col, 300);
-    if (cur) setKeyMode(rc, cur.mode);
+    if (cur) {
+      setKeyMode(rc, cur.mode);
+      if (cur.axisRangeMax > 0) keyTravel.set(rc, cur.axisRangeMax);
+    }
   }
   const rt = [...keyMode.values()].filter(m => m === 1).length;
   log(`Read ${keyMode.size}/${KEY_LAYOUT.length} key modes - ${rt} on Rapid Trigger.`);
@@ -485,6 +535,9 @@ function drawGauge() {
   }
   const pct = Math.max(0, Math.min(100, (trigger / travelMm) * 100));
   html += `<div class="mark" style="top:${pct}%"><span>${rt ? 'starts' : 'fires'} ${trigger.toFixed(2)}</span></div>`;
+  // Moved by the travel poll rather than by redrawing the gauge 20x a second. Sitting on
+  // the same scale as the trigger mark is the point: you watch the key cross it.
+  html += `<div class="mark live" id="liveMark" hidden style="top:0%"><span></span></div>`;
   document.getElementById('gauge').innerHTML = html + '</div>';
 }
 
@@ -525,6 +578,15 @@ for (const btn of document.querySelectorAll('.navbtn')) {
     for (const b of document.querySelectorAll('.navbtn')) b.classList.toggle('active', b === btn);
     for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== 'view-' + btn.dataset.view;
     document.getElementById('viewTitle').textContent = btn.textContent;
+    // Polling only runs while its view is on screen: a loop left running competes with
+    // auto-save for the io chain and keeps the device busy for nothing.
+    setTravelTest(btn.dataset.view === 'traveltest');
+    if (btn.dataset.view !== 'calibration') {
+      const arm = document.getElementById('calStart');
+      arm.dataset.armed = '0';
+      arm.textContent = 'Start calibration';
+      if (calibrating) log('WARNING: calibration is still running. Go back and press Finish.');
+    }
   };
 }
 document.querySelector('.navbtn').classList.add('active');
@@ -573,6 +635,7 @@ function pickControlDevice(devices) {
 }
 
 async function useDevice(d) {
+  setTravelTest(false);
   device = d;
   if (!device.opened) await device.open();
   device.addEventListener('inputreport', onInputReport);
@@ -582,6 +645,7 @@ async function useDevice(d) {
   log(`Connected to ${device.productName} (vid=0x${device.vendorId.toString(16)} pid=0x${device.productId.toString(16)})`);
   // Configs first: which one is active decides what every later read returns.
   await loadConfigs();
+  if (!document.getElementById('view-traveltest').hidden) setTravelTest(true);
   await fillFormFrom(selected.values().next().value);
   await loadAllModes();
 }
@@ -781,6 +845,154 @@ function readCfg() {
     releaseDeadStroke: parseFloat(document.getElementById('releaseDeadStroke').value),
   };
 }
+
+// ---- Axis data: live travel and calibration state -------------------------------
+// One packet answers for a whole row, so polling the board is ~5 reads, not 64.
+async function getAxisRow(mode, row, timeout = 400) {
+  const res = await sendAndWait([CATEGORY.Performance, PERF_SUB.AxisData, mode, row], timeout);
+  if (!res) return null;
+  const data = [];
+  for (let i = 4; i + 1 < 64; i += 2) data.push(res[i] | res[i + 1] << 8);
+  return { mode: res[2], row: res[3], data };
+}
+
+const KB_ROWS = [...new Set(KEY_LAYOUT.map(([rc]) => Number(rc.split('-')[0])))].sort((a, b) => a - b);
+// Each key's own full-scale travel, captured from axisRangeMax while reading modes.
+// Scaling the fill by this rather than a constant keeps it right whatever unit Route
+// is in, as long as it shares units with axisRangeMax - both come from the axis subsystem.
+const keyTravel = new Map();
+let ttPeak = 0, ttPeakKey = null;
+
+function paintTravelRow(row, data) {
+  for (let col = 0; col < data.length; col++) {
+    const rc = `${row}-${col}`;
+    const el = keyEl.get(rc);
+    if (!el) continue;
+    const full = keyTravel.get(rc) || 3390;
+    const pct = Math.max(0, Math.min(100, (data[col] / full) * 100));
+    el.querySelector('.lvl').style.height = pct + '%';
+    if (rc === selected.values().next().value) showTravelReadout(rc, data[col], full);
+  }
+}
+
+function showTravelReadout(rc, raw, full) {
+  if (rc !== ttPeakKey) { ttPeakKey = rc; ttPeak = 0; }
+  ttPeak = Math.max(ttPeak, raw);
+  document.getElementById('ttKey').textContent = KEY_LABEL.get(rc) || rc;
+  document.getElementById('ttMm').textContent = (raw / 1000).toFixed(2) + ' mm';
+  document.getElementById('ttPeak').textContent = (ttPeak / 1000).toFixed(2) + ' mm';
+  document.getElementById('ttRaw').textContent = `${raw} / ${full}`;
+  const live = document.getElementById('liveMark');
+  if (live) {
+    live.hidden = false;
+    live.style.top = Math.max(0, Math.min(100, (raw / full) * 100)) + '%';
+    live.querySelector('span').textContent = 'now ' + (raw / 1000).toFixed(2);
+  }
+}
+
+function clearTravelPaint() {
+  for (const el of keyEl.values()) el.querySelector('.lvl').style.height = '0';
+  const live = document.getElementById('liveMark');
+  if (live) live.hidden = true;
+}
+
+// A self-paced loop rather than setInterval: each pass waits for the previous reads to
+// land, so a slow device throttles the poll instead of stacking requests behind it.
+let travelRunning = false;
+async function travelLoop() {
+  while (travelRunning) {
+    // Yield to auto-save rather than queueing five reads ahead of the user's own edit.
+    if (device && !writing) {
+      for (const row of KB_ROWS) {
+        if (!travelRunning) break;
+        const r = await getAxisRow(AXIS_MODE.Route, row);
+        if (r) paintTravelRow(row, r.data);
+      }
+    }
+    await new Promise(r => setTimeout(r, 40));
+  }
+  clearTravelPaint();
+}
+
+function setTravelTest(on) {
+  if (on === travelRunning) return;
+  travelRunning = on;
+  if (on) {
+    if (!device) { log('Travel test: not connected.'); travelRunning = false; return; }
+    log('Travel test started.');
+    travelLoop();
+  } else {
+    log('Travel test stopped.');
+  }
+}
+
+// ---- Calibration ----------------------------------------------------------------
+// Never started automatically. The button arms on the first click and only fires on
+// the second, because this overwrites every key's stored calibration.
+let calibrating = false, calibDumped = false;
+
+async function pollCalibrationProgress() {
+  while (calibrating) {
+    if (device && !writing) {
+      let done = 0, total = 0;
+      for (const row of KB_ROWS) {
+        if (!calibrating) break;
+        const r = await getAxisRow(AXIS_MODE.Calibrate, row);
+        if (!r) continue;
+        // The meaning of these values is the one thing not pinned down from the vendor
+        // source, so dump one row once rather than trusting the >0 reading below.
+        if (!calibDumped) { calibDumped = true; log(`Calibrate row ${row} raw: [${r.data.slice(0, 16).join(',')}]`); }
+        for (let col = 0; col < r.data.length; col++) {
+          const el = keyEl.get(`${row}-${col}`);
+          if (!el) continue;
+          total++;
+          const ok = r.data[col] > 0;
+          if (ok) done++;
+          el.classList.toggle('done', ok);
+        }
+      }
+      if (calibrating) {
+        document.getElementById('calState').textContent =
+          `Running - ${done}/${total} keys learned. Press every key fully down, then release.`;
+      }
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
+}
+
+document.getElementById('calStart').onclick = async () => {
+  const btn = document.getElementById('calStart');
+  if (!device) { log('Calibration: not connected.'); return; }
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Click again to confirm';
+    document.getElementById('calState').textContent =
+      'This will overwrite the calibration on all keys. Click again to go ahead, or switch view to cancel.';
+    return;
+  }
+  btn.dataset.armed = '0';
+  btn.textContent = 'Start calibration';
+  const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.CalibrationSetting, CALIB.Open]);
+  if (!res) { log('Calibration: no response to start.'); document.getElementById('calState').textContent = 'Could not start - no response.'; return; }
+  calibrating = true;
+  btn.hidden = true;
+  document.getElementById('calFinish').hidden = false;
+  log('Calibration STARTED - press every key fully down and release.');
+  pollCalibrationProgress();
+};
+
+document.getElementById('calFinish').onclick = async () => {
+  calibrating = false;
+  const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.CalibrationSetting, CALIB.Close]);
+  document.getElementById('calFinish').hidden = true;
+  document.getElementById('calStart').hidden = false;
+  for (const el of keyEl.values()) el.classList.remove('done');
+  document.getElementById('calState').textContent = res ? 'Calibration finished.' : 'Sent finish, but no response.';
+  log(res ? 'Calibration FINISHED.' : 'Calibration finish: no response.');
+  // Re-read: travel ranges have just changed, so anything on screen is stale.
+  await fillFormFrom(selected.values().next().value);
+  await loadAllModes();
+};
 
 document.getElementById('getPerf').onclick = async () => {
   if (!selected.size) { log('No keys selected.'); return; }
