@@ -59,6 +59,10 @@
   #configSelect { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--accent); color: var(--ink); font-family: var(--term); font-size: 17px; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
   #configSelect:disabled { background: var(--surface); cursor: not-allowed; }
   .navbtn { width: 100%; text-align: left; }
+  /* These three all answer the same question - where does the key trigger, and does it
+     really trigger there. The rest are unrelated, so they just sit below a rule. */
+  .navgroup { font-size: 15px; color: var(--ink); opacity: .75; letter-spacing: .09em; }
+  .navsep { border-top: 2px solid var(--ink); margin: 3px 0 0; }
   .navbtn.active { background: var(--ink); color: var(--accent); }
   .navbtn.active:hover { background: var(--ink); }
 
@@ -201,9 +205,11 @@
       <label for="configSelect">CONFIG</label>
       <select id="configSelect" disabled><option>--</option></select>
     </div>
-    <button class="navbtn" data-view="performance">Performance</button>
+    <span class="navgroup">TRIGGER</span>
+    <button class="navbtn" data-view="performance">Settings</button>
     <button class="navbtn" data-view="traveltest">Travel test</button>
     <button class="navbtn" data-view="calibration">Calibration</button>
+    <div class="navsep"></div>
     <button class="navbtn" data-view="log">Log</button>
     <button class="navbtn" data-view="rate">Polling rate</button>
     <button class="navbtn" data-view="light">Lighting</button>
@@ -224,7 +230,7 @@
   </section>
 
   <section class="panel viewpanel">
-    <h2 id="viewTitle">Performance</h2>
+    <h2 id="viewTitle">Trigger settings</h2>
 
     <div class="view" id="view-performance">
       <div class="tabs">
@@ -582,7 +588,8 @@ for (const btn of document.querySelectorAll('.navbtn')) {
   btn.onclick = () => {
     for (const b of document.querySelectorAll('.navbtn')) b.classList.toggle('active', b === btn);
     for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== 'view-' + btn.dataset.view;
-    document.getElementById('viewTitle').textContent = btn.textContent;
+    document.getElementById('viewTitle').textContent =
+      btn.dataset.view === 'performance' ? 'Trigger settings' : btn.textContent;
     // Polling only runs while its view is on screen: a loop left running competes with
     // auto-save for the io chain and keeps the device busy for nothing.
     setTravelTest(btn.dataset.view === 'traveltest');
