@@ -88,9 +88,17 @@
   button.primary:hover { background: var(--ink); color: var(--accent); }
   :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 
+  /* Same height as the keyboard block it replaces, so connecting does not shove the
+     rest of the layout around. */
+  #kbEmpty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 256px; color: var(--muted); }
+  #kbEmpty p { margin: 0; }
+  #kbEmpty .kbicon { font-size: 64px; line-height: 1; color: var(--ink); opacity: .45; }
   #kbTools { display: flex; justify-content: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-  #kb { position: relative; margin: 0 auto; max-width: 100%; background: var(--ink); border: 2px solid var(--ink); padding: 9px; overflow-x: auto; }
-  #kb .kb-key { position: absolute; background: var(--surface); color: var(--ink); border: 1px solid var(--ink); border-radius: 0; font-family: var(--term); font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 0; overflow: hidden; }
+  /* The keycaps used to be the same cream as the panel behind them, so the whole board
+     melted into the background. Caps are now lighter than the panel and the bezel is
+     lifted off it with a hard shadow, which makes it read as a device sitting there. */
+  #kb { position: relative; margin: 0 auto; max-width: 100%; background: var(--ink); border: 3px solid var(--ink); padding: 9px; overflow-x: auto; box-shadow: 5px 5px 0 rgba(18,53,43,.45); }
+  #kb .kb-key { position: absolute; background: #FFF8EC; color: var(--ink); border: 1px solid var(--ink); box-shadow: 0 2px 0 rgba(18,53,43,.55); border-radius: 0; font-family: var(--term); font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 0; overflow: hidden; }
   #kb .kb-key:hover { background: var(--accent); }
   #kb .kb-key.selected { background: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
@@ -219,6 +227,11 @@
 
   <section class="panel kbpanel">
     <h2>Pick the keys to tune</h2>
+    <div id="kbEmpty">
+      <div class="kbicon">&#9000;</div>
+      <p>No keyboard connected.</p>
+      <button id="connect2">Connect keyboard</button>
+    </div>
     <div id="kbTools">
       <button id="selWasd">WASD</button>
       <button id="selAll">Select all</button>
@@ -397,6 +410,15 @@ const keyEl = new Map();
 function setKeyMode(rc, mode) {
   keyMode.set(rc, mode);
   keyEl.get(rc)?.classList.toggle('rt', mode === 1);
+}
+
+// The virtual keyboard is only meaningful with a device behind it - clicking keys with
+// nothing connected just produces a selection that can never be read or written.
+function updateKbVisibility() {
+  const on = !!device;
+  document.getElementById('kbEmpty').hidden = on;
+  document.getElementById('kb').hidden = !on;
+  document.getElementById('kbTools').hidden = !on;
 }
 
 function renderKeyboard() {
@@ -654,6 +676,7 @@ async function useDevice(d) {
   const st = document.getElementById('status');
   st.textContent = `Connected to ${device.productName}`;
   st.classList.add('live');
+  updateKbVisibility();
   log(`Connected to ${device.productName} (vid=0x${device.vendorId.toString(16)} pid=0x${device.productId.toString(16)})`);
   // Configs first: which one is active decides what every later read returns.
   await loadConfigs();
@@ -718,6 +741,22 @@ async function sendAndWaitRaw(bytes, timeout = 1000) {
 }
 
 document.getElementById('connect').onclick = connect;
+document.getElementById('connect2').onclick = connect;
+
+// Unplugging left the board on screen looking live, and every poll silently timing out.
+navigator.hid.addEventListener('disconnect', ({ device: d }) => {
+  if (!device || d.vendorId !== device.vendorId || d.productId !== device.productId) return;
+  setTravelTest(false);
+  calibrating = false;
+  device = null;
+  const st = document.getElementById('status');
+  st.textContent = 'Not connected';
+  st.classList.remove('live');
+  configCount = 0; currentConfig = null; configNames.clear();
+  renderConfigPicker();
+  updateKbVisibility();
+  log('Keyboard disconnected.');
+});
 
 // The keyboard stores 4 independent configs. Every per-key performance value belongs
 // to the active one, so switching means everything on screen is stale.
@@ -1272,6 +1311,7 @@ document.getElementById('colorize').onclick = async () => {
 };
 
 renderKeyboard();
+updateKbVisibility();
 syncSliders();
 setRtMode(0);
 </script>
