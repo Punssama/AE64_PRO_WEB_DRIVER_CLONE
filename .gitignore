@@ -1,0 +1,6 @@
+# The official site's compiled bundle, downloaded only as a reverse-engineering
+# reference. It is xsyd.top's copyrighted code and is deliberately NOT redistributed.
+index.js
+
+# Local static-server noise
+server.log

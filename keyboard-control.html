@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AE64 Pro Tuner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+  /* A DOS-era TUI program, not a web page: one monospace face throughout, hierarchy
+     carried by inverse-video bars rather than type changes - the way a text-mode app
+     had to do it. Ink is the supplied green pushed dark so text stays readable. */
+  :root {
+    --desk: #59B292;
+    --surface: #FAE7CB;
+    --accent: #FFC94D;
+    --ink: #12352B;
+    --muted: #4A6B5C;
+    --term: 'VT323', 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; }
+  /* Any rule that sets `display` outranks the browser's `[hidden] { display: none }`,
+     so a hidden grid or flex container quietly stays on screen. Everything here is
+     shown and hidden through the attribute, so make it win outright. */
+  [hidden] { display: none !important; }
+  /* The app is locked to the viewport: the page itself never scrolls, only the
+     switched view scrolls if a section outgrows its box. */
+  html, body { height: 100%; }
+  body {
+    margin: 0; padding: 10px; color: var(--ink); overflow: hidden;
+    font-family: var(--term); font-size: 18px; line-height: 1.35;
+    background-color: var(--desk);
+    background-image: repeating-linear-gradient(45deg, rgba(18,53,43,.07) 0 2px, transparent 2px 4px);
+  }
+  .wrap { height: 100%; display: flex; }
+
+  /* Title bar and status bar frame the screen; the desktop shows through between them,
+     so each panel reads as its own window instead of one tall shared surface. */
+  .app { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 2px solid var(--ink); box-shadow: 6px 6px 0 rgba(18,53,43,.45); background: transparent; }
+  .titlebar { flex: none; display: flex; align-items: center; gap: 14px; background: var(--accent); border-bottom: 2px solid var(--ink); padding: 4px 12px; }
+  .titlebar h1 { margin: 0; font-size: 20px; font-weight: normal; letter-spacing: .06em; }
+  .titlebar .spacer { flex: 1; }
+  /* The device's own 4 stored configs. They live in the title bar because they are
+     device-wide state, like the connection - not a per-key setting. */
+  #configBar { display: flex; align-items: center; gap: 5px; }
+  #configBar .barlabel { color: var(--ink); opacity: .7; letter-spacing: .08em; }
+  .cfgbtn { padding: 2px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cfgbtn.active, .cfgbtn.active:hover { background: var(--ink); color: var(--accent); }
+  #status { margin: 0; }
+  #status::before { content: '[ '; }
+  #status::after { content: ' ]'; }
+  .appbody { flex: 1; min-height: 0; display: grid; grid-template-columns: 152px minmax(0, 1fr) 272px; gap: 12px; padding: 12px; }
+  .statusbar { flex: none; display: flex; align-items: center; gap: 12px; border-top: 2px solid var(--ink); background: var(--accent); padding: 3px 12px; }
+  .statusbar p { margin: 0; }
+  .statusbar .spacer { flex: 1; }
+  /* Nothing is ever "unsaved" now, so this is a receipt, not a prompt. */
+  #saveState:not(:empty)::before { content: '\2713 '; }
+  #saveState.busy::before { content: ''; }
+
+  .sidebar { display: flex; flex-direction: column; gap: 7px; min-height: 0; }
+  .navbtn { width: 100%; text-align: left; }
+  .navbtn.active { background: var(--ink); color: var(--accent); }
+  .navbtn.active:hover { background: var(--ink); }
+
+  .center { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; min-height: 0; }
+  .panel { border: 2px solid var(--ink); padding: 12px; background: var(--surface); box-shadow: 4px 4px 0 rgba(18,53,43,.35); }
+  .kbpanel { min-width: 0; overflow-x: auto; }
+  .viewpanel { min-height: 0; display: flex; flex-direction: column; }
+  .view { flex: 1; min-height: 0; overflow: auto; }
+  /* Column so Apply stays pinned at the bottom - it must not jump when the taller
+     Rapid-trigger tab swaps in for the shorter Dead-zone one. */
+  .travel { min-height: 0; display: flex; flex-direction: column; }
+
+  /* Nothing here can be set until a key is picked - the values would have no target. */
+  :disabled, .view [disabled] { opacity: .38; cursor: not-allowed; }
+  .gauge.off { opacity: .3; }
+  /* Panel titles are inverse-video strips flush in the frame, like a TUI group box. */
+  h2 { flex: none; margin: -12px -12px 11px; padding: 2px 10px; font-size: 18px; font-weight: normal; background: var(--ink); color: var(--surface); letter-spacing: .05em; }
+
+  button { font-family: var(--term); font-size: 17px; line-height: 1; padding: 7px 13px; background: var(--surface); color: var(--ink); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
+  button:hover { background: var(--accent); }
+  button:active { transform: translate(3px, 3px); box-shadow: none; }
+  button.primary { background: var(--accent); width: 100%; padding: 11px; }
+  button.primary:hover { background: var(--ink); color: var(--accent); }
+  :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+
+  #kbTools { display: flex; justify-content: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  #kb { position: relative; margin: 0 auto; max-width: 100%; background: var(--ink); border: 2px solid var(--ink); padding: 9px; overflow-x: auto; }
+  #kb .kb-key { position: absolute; background: var(--surface); color: var(--ink); border: 1px solid var(--ink); border-radius: 0; font-family: var(--term); font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 0; overflow: hidden; }
+  #kb .kb-key:hover { background: var(--accent); }
+  #kb .kb-key.selected { background: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
+  /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
+  #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 12px; line-height: 1.15; background: var(--ink); color: var(--accent); }
+  #kb .kb-key.rt .tag { display: block; }
+
+  /* The meter sits on an ink field so all three palette colours stay legible on it:
+     amber marks where the key fires, green fills the travel above it. */
+  /* The settings live in the centre panel, so the gauge gets the whole travel column
+     to itself and grows into it. Everything inside it is positioned in percentages. */
+  .gauge { position: relative; flex: 1; min-height: 120px; margin: 2px 0 12px; padding-left: 46px; }
+  .gauge-track { position: relative; width: 34px; height: 100%; background: var(--ink); border: 2px solid var(--ink); }
+  .seg { position: absolute; left: 0; right: 0; border-bottom: 2px solid var(--ink); background: #234A3E; }
+  .seg.lit { background: var(--desk); }
+  .tick { position: absolute; left: 0; right: 0; }
+  .tick span { position: absolute; right: calc(100% + 9px); transform: translateY(-50%); font-size: 16px; color: var(--muted); }
+  /* One marker now that normal mode has a single actuation point, so it spans the
+     full track - the old half-width lanes existed only to stop fires/resets hiding
+     each other when both sat at the same depth. */
+  .mark { position: absolute; left: 0; right: 0; color: var(--accent); }
+  .mark::before { content: ''; position: absolute; left: -4px; right: -4px; top: -3px; height: 6px; background: currentColor; }
+  .mark span { position: absolute; left: calc(100% + 10px); transform: translateY(-50%); font-size: 17px; color: var(--ink); white-space: nowrap; }
+  .mark span::before { content: '\25B8 '; }
+
+  .field { margin-bottom: 11px; }
+  .field label { display: block; font-size: 17px; color: var(--muted); margin-bottom: 3px; }
+  .field input, .field select { width: 100%; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
+
+  /* Slider plus typed value. The spinner arrows are removed - the slider is the
+     coarse control, the box is for exact entry. */
+  .ctl { display: flex; align-items: center; gap: 9px; }
+  .ctl input[type=number] { width: 76px; flex: none; text-align: right; }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+
+  /* A text-mode scrollbar: square groove, square block for the handle. */
+  input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; min-width: 0; width: auto; height: 24px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 16px; background: #FFF6E6; border: 2px solid var(--ink); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 24px; margin-top: -6px; background: var(--accent); border: 2px solid var(--ink); border-radius: 0; }
+  input[type=range]::-moz-range-track { height: 16px; background: #FFF6E6; border: 2px solid var(--ink); }
+  input[type=range]::-moz-range-thumb { width: 13px; height: 22px; background: var(--accent); border: 2px solid var(--ink); border-radius: 0; }
+  .hint { margin: 0 0 12px; color: var(--muted); }
+
+  .viewpanel h2 { margin-bottom: 8px; }
+
+  /* Two tabs inside the Performance view: Rapid trigger and Dead zone. Same inverse-video
+     active state as the sidebar, so "where am I" reads the same way everywhere. */
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tab { min-width: 150px; padding: 5px 12px; font-size: 17px; text-align: center; box-shadow: none; }
+  .tab.active, .tab.active:hover { background: var(--ink); color: var(--accent); }
+
+  /* The mode is one switch, not a list of two - a toggle says so at a glance. */
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .toggle .tog { border: 2px solid currentColor; padding: 1px 9px; }
+  .toggle[aria-pressed="true"], .toggle[aria-pressed="true"]:hover { background: var(--ink); color: var(--accent); }
+
+  /* One control strip: the toggle and the sliders it governs share a row. The centre
+     column is ~1040px wide, so horizontal space is the free kind here - and giving the
+     toggle a row of its own cost 51px of the 142px the view has. */
+  .fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 20px; align-items: end; }
+  .fields .field { margin-bottom: 0; }
+  /* The two groups are only there to be shown and hidden - their fields must still be
+     items of the grid above, not of a box inside it. */
+  #normalFields, #rtFields { display: contents; }
+
+  #log { background: var(--ink); color: var(--desk); font-family: var(--term); font-size: 16px; line-height: 1.25; padding: 11px; height: 100%; overflow-y: auto; white-space: pre-wrap; }
+
+  @media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } button:active { transform: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="app">
+
+<header class="titlebar">
+  <h1>AE64 PRO TUNER</h1>
+  <div id="configBar"></div>
+  <span class="spacer"></span>
+  <p id="status">Not connected</p>
+  <button id="connect">Connect keyboard</button>
+</header>
+
+<div class="appbody">
+
+  <nav class="sidebar">
+    <button class="navbtn" data-view="performance">Performance</button>
+    <button class="navbtn" data-view="log">Log</button>
+    <button class="navbtn" data-view="rate">Polling rate</button>
+    <button class="navbtn" data-view="light">Lighting</button>
+  </nav>
+
+  <div class="center">
+
+  <section class="panel kbpanel">
+    <h2>Pick the keys to tune</h2>
+    <div id="kbTools">
+      <button id="selWasd">WASD</button>
+      <button id="selAll">Select all</button>
+      <button id="selInvert">Invert</button>
+      <button id="selNone">Clear</button>
+      <button id="getPerf" data-needs-key>Read selected keys</button>
+    </div>
+    <div id="kb"></div>
+  </section>
+
+  <section class="panel viewpanel">
+    <h2 id="viewTitle">Performance</h2>
+
+    <div class="view" id="view-performance">
+      <div class="tabs">
+        <button class="tab active" data-tab="rt">Rapid trigger</button>
+        <button class="tab" data-tab="dz">Dead zone</button>
+      </div>
+
+      <div class="tabpane fields" id="tab-rt">
+        <button id="rtToggle" class="toggle" data-needs-key aria-pressed="false">
+          <span>Rapid trigger</span><span class="tog">OFF</span>
+        </button>
+        <!-- One "first trigger" slider either way, but it drives a different field per
+             mode: the firmware reads normalPress when off and rtFirstTouch when on. -->
+        <div id="normalFields">
+          <div class="field">
+            <label for="normalPress">First trigger (mm)</label>
+            <div class="ctl"><input type="range" id="normalPress_r" min="0" max="3.4" step="0.05"><input id="normalPress" type="number" step="0.05" value="1.0"></div>
+          </div>
+        </div>
+        <div id="rtFields" hidden>
+          <div class="field">
+            <label for="rtFirstTouch">First trigger (mm)</label>
+            <div class="ctl"><input type="range" id="rtFirstTouch_r" min="0" max="3.4" step="0.05"><input id="rtFirstTouch" type="number" step="0.05" value="0.3"></div>
+          </div>
+          <div class="field">
+            <label for="rtPress">Press sensitivity (mm)</label>
+            <div class="ctl"><input type="range" id="rtPress_r" min="0" max="1" step="0.02"><input id="rtPress" type="number" step="0.02" value="0.2"></div>
+          </div>
+          <div class="field">
+            <label for="rtRelease">Release sensitivity (mm)</label>
+            <div class="ctl"><input type="range" id="rtRelease_r" min="0" max="1" step="0.02"><input id="rtRelease" type="number" step="0.02" value="0.2"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabpane" id="tab-dz" hidden>
+        <p class="hint">Travel the keyboard ignores at each end of the key.</p>
+        <div class="fields">
+          <div class="field">
+            <label for="pressDeadStroke">Top dead zone (mm)</label>
+            <div class="ctl"><input type="range" id="pressDeadStroke_r" min="0" max="3.4" step="0.05"><input id="pressDeadStroke" type="number" step="0.05" value="0.2"></div>
+          </div>
+          <div class="field">
+            <label for="releaseDeadStroke">Bottom dead zone (mm)</label>
+            <!-- 3.4, not the old 3.8: a placeholder deeper than the switch's real travel
+                 is what caused the key to chatter the first time it was written blind. -->
+            <div class="ctl"><input type="range" id="releaseDeadStroke_r" min="0" max="3.4" step="0.05"><input id="releaseDeadStroke" type="number" step="0.05" value="3.4"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="view-log" hidden><div id="log"></div></div>
+
+    <div class="view" id="view-rate" hidden>
+        <p class="hint">How often the keyboard reports to the PC. Changing this briefly disconnects and reconnects the keyboard.</p>
+        <div class="field">
+          <label for="rate">Rate</label>
+          <select id="rate">
+            <option value="0">8000 Hz</option>
+            <option value="1">4000 Hz</option>
+            <option value="2">2000 Hz</option>
+            <option value="3">1000 Hz</option>
+            <option value="4">500 Hz</option>
+            <option value="5">250 Hz</option>
+            <option value="6">125 Hz</option>
+          </select>
+        </div>
+        <button id="getRate">Read current</button>
+        <button id="setRate">Apply rate</button>
+    </div>
+
+    <div class="view" id="view-light" hidden>
+        <p class="hint">Reads every key's mode and lights it white for Normal, red for Rapid Trigger. Takes about 30 seconds, and the colours hold until you stop it.</p>
+        <button id="colorize">Colorize by mode</button>
+    </div>
+
+  </section>
+
+  </div>
+
+  <aside class="panel travel">
+    <h2>Travel</h2>
+    <div class="gauge" id="gauge"></div>
+  </aside>
+
+</div>
+
+<div class="statusbar"><p id="selectedLabel">No keys picked yet.</p><span class="spacer"></span><p id="saveState"></p></div>
+
+</div>
+</div>
+
+<script>
+// Protocol reverse-engineered from https://www.xsyd.top/ (own device, WebHID).
+const CATEGORY = { Global: 2, Performance: 4, Lighting: 5 };
+const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5 };
+// ConfigSwitch's third byte is NOT the QR enum the other commands use: 0/1/2 line up
+// with ReadList/Read/Write, but 3 and 4 are name get/set, which QR has no values for.
+const CFG_OP = { List: 0, Read: 1, Switch: 2, GetName: 3, SetName: 4 };
+const QR = { ReadList: 0, Read: 1, Write: 2 };
+const PERF_SUB = { GetPerformance: 1, SetPerformance: 2 };
+const LIGHT_SUB = { DirectDrive: 5 };
+const AREA = { Keyboard: 0 };
+
+let device = null;
+let waiters = [];
+
+// Physical key layout scraped from the official site's DOM (xsyd.top, Performance page,
+// .device-keyboard-container .key[data-key="row-col"]) for an AE64 Pro. x/y/w/h are the
+// on-screen pixel geometry as scraped - only used for relative layout, not to scale.
+const KEY_LAYOUT = [
+  ['1-0','Esc',257,28,22,22],['1-1','1 !',279,28,22,22],['1-2','2 @',302,28,22,22],['1-3','3 #',325,28,22,22],
+  ['1-4','4 $',348,28,22,22],['1-5','5 %',371,28,22,22],['1-6','6 ^',394,28,22,22],['1-7','7 &',417,28,22,22],
+  ['1-8','8 *',440,28,22,22],['1-9','9 (',462,28,22,22],['1-10','0 )',485,28,22,22],['1-11','- _',508,28,22,22],
+  ['1-12','= +',531,28,22,22],['1-13','Backspace',554,28,44,22],
+  ['2-0','Tab',257,51,33,22],['2-1','Q',290,51,22,22],['2-2','W',313,51,22,22],['2-3','E',336,51,22,22],
+  ['2-4','R',359,51,22,22],['2-5','T',382,51,22,22],['2-6','Y',405,51,22,22],['2-7','U',428,51,22,22],
+  ['2-8','I',450,51,22,22],['2-9','O',473,51,22,22],['2-10','P',496,51,22,22],['2-11','[ {',519,51,22,22],
+  ['2-12','] }',542,51,22,22],['2-13','\\ |',565,51,33,22],
+  ['3-0','Caps',257,73,38,22],['3-1','A',296,73,22,22],['3-2','S',319,73,22,22],['3-3','D',342,73,22,22],
+  ['3-4','F',364,73,22,22],['3-5','G',387,73,22,22],['3-6','H',410,73,22,22],['3-7','J',433,73,22,22],
+  ['3-8','K',456,73,22,22],['3-9','L',479,73,22,22],['3-10','; :',502,73,22,22],["3-11","' \"",524,73,22,22],
+  ['3-13','Enter',548,73,49,22],
+  ['4-0','L-Shift',257,96,44,22],['4-2','Z',302,96,22,22],['4-3','X',325,96,22,22],['4-4','C',348,96,22,22],
+  ['4-5','V',371,96,22,22],['4-6','B',394,96,22,22],['4-7','N',417,96,22,22],['4-8','M',440,96,22,22],
+  ['4-9',', <',462,96,22,22],['4-10','. >',485,96,22,22],['4-11','/ ?',508,96,22,22],['4-12','PgUp',531,96,22,22],
+  ['4-13','↑',554,96,22,22],['4-14','PgDn',577,96,22,22],
+  ['5-0','L-Ctrl',257,119,27,22],['5-1','L-Gui',285,119,27,22],['5-2','L-Alt',313,119,27,22],
+  ['5-6','Space',345,119,136,22],['5-9','R-Alt',484,119,22,22],['5-10','Fn1',507,119,22,22],
+  ['5-12','←',531,119,22,22],['5-13','↓',554,119,22,22],['5-14','→',577,119,22,22],
+];
+const KB_MINX = 257, KB_MINY = 28, KB_SCALE = 1.75;
+const KEY_LABEL = new Map(KEY_LAYOUT.map(([rc, label]) => [rc, label]));
+// Starts empty on purpose: Set refuses to write with nothing selected, so no key
+// can be touched before one is deliberately picked.
+const selected = new Set();
+// "row-col" -> the mode byte the device last told us it holds, and the keycap showing it.
+// This is what puts the RT tag on a key; it is only ever set from a real device read.
+const keyMode = new Map();
+const keyEl = new Map();
+
+function setKeyMode(rc, mode) {
+  keyMode.set(rc, mode);
+  keyEl.get(rc)?.classList.toggle('rt', mode === 1);
+}
+
+function renderKeyboard() {
+  const kb = document.getElementById('kb');
+  let maxX = 0, maxY = 0;
+  KEY_LAYOUT.forEach(([, , x, y, w, h]) => { maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h); });
+  kb.style.width = ((maxX - KB_MINX) * KB_SCALE + 12) + 'px';
+  kb.style.height = ((maxY - KB_MINY) * KB_SCALE + 12) + 'px';
+  KEY_LAYOUT.forEach(([rc, label, x, y, w, h]) => {
+    const [row, col] = rc.split('-').map(Number);
+    const btn = document.createElement('div');
+    btn.className = 'kb-key';
+    btn.append(label, Object.assign(document.createElement('span'), { className: 'tag', textContent: 'RT' }));
+    keyEl.set(rc, btn);
+    btn.style.left = ((x - KB_MINX) * KB_SCALE + 6) + 'px';
+    btn.style.top = ((y - KB_MINY) * KB_SCALE + 6) + 'px';
+    btn.style.width = (w * KB_SCALE - 2) + 'px';
+    btn.style.height = (h * KB_SCALE - 2) + 'px';
+    btn.dataset.row = row;
+    btn.dataset.col = col;
+    btn.onclick = () => toggleKey(row, col);
+    kb.appendChild(btn);
+  });
+  updateSelectionUI();
+}
+
+async function toggleKey(row, col) {
+  const rc = `${row}-${col}`;
+  if (selected.has(rc)) { selected.delete(rc); updateSelectionUI(); return; }
+  selected.add(rc);
+  updateSelectionUI();
+  await fillFormFrom(rc);
+}
+
+function setSelection(rcs) {
+  selected.clear();
+  rcs.forEach(rc => selected.add(rc));
+  updateSelectionUI();
+  return fillFormFrom(selected.values().next().value);
+}
+
+async function fillFormFrom(rc) {
+  if (!device || !rc) return;
+  const [row, col] = rc.split('-').map(Number);
+  const cur = await getPerformanceRaw(row, col);
+  if (!cur) { log(`row=${row} col=${col}: no response, form unchanged`); return; }
+  setKeyMode(rc, cur.mode);
+  fillCfg(cur);
+}
+
+// The keycap tags are only truthful if every key's mode is known, so read them all once
+// on connect. All 64 are real keys, so each answers immediately.
+async function loadAllModes() {
+  for (const [rc] of KEY_LAYOUT) {
+    const [row, col] = rc.split('-').map(Number);
+    const cur = await getPerformanceRaw(row, col, 300);
+    if (cur) setKeyMode(rc, cur.mode);
+  }
+  const rt = [...keyMode.values()].filter(m => m === 1).length;
+  log(`Read ${keyMode.size}/${KEY_LAYOUT.length} key modes - ${rt} on Rapid Trigger.`);
+}
+
+// Inverse of readCfg. Set writes every field, so any input left showing a stale
+// default silently overwrites that value on the key - the form has to mirror the device.
+function fillCfg(cur) {
+  setRtMode(cur.mode);
+  for (const id of SLIDER_FIELDS) document.getElementById(id).value = cur[id];
+  if (cur.axisRangeMax > 0) travelMm = cur.axisRangeMax / 1000;
+  syncSliders();
+  drawGauge();
+}
+
+// 0 = normal, 1 = rapid trigger. Mirrors the device's mode byte; the toggle is the
+// only thing that changes it, so there is one copy of this state, not two.
+let rtMode = 0;
+function setRtMode(v) {
+  rtMode = v ? 1 : 0;
+  const btn = document.getElementById('rtToggle');
+  btn.setAttribute('aria-pressed', rtMode ? 'true' : 'false');
+  btn.querySelector('.tog').textContent = rtMode ? 'ON' : 'OFF';
+  document.getElementById('normalFields').hidden = !!rtMode;
+  document.getElementById('rtFields').hidden = !rtMode;
+  drawGauge();
+}
+document.getElementById('rtToggle').onclick = () => {
+  setRtMode(!rtMode);
+  // Flip the keycap tags before the write lands - the user asked for the tag to react
+  // instantly. `applyNow` repaints them from the read-back, so a refused write corrects itself.
+  for (const rc of selected) setKeyMode(rc, rtMode);
+  scheduleApply(0);
+};
+
+for (const t of document.querySelectorAll('.tab')) {
+  t.onclick = () => {
+    for (const b of document.querySelectorAll('.tab')) b.classList.toggle('active', b === t);
+    for (const p of document.querySelectorAll('.tabpane')) p.hidden = p.id !== 'tab-' + t.dataset.tab;
+  };
+}
+
+function updateSelectionUI() {
+  document.querySelectorAll('#kb .kb-key').forEach(el => {
+    el.classList.toggle('selected', selected.has(`${el.dataset.row}-${el.dataset.col}`));
+  });
+  const n = selected.size;
+  const rc = selected.values().next().value;
+  document.getElementById('selectedLabel').textContent =
+    n === 0 ? 'No keys picked yet. Click a key to start; click it again to drop it.' :
+    n === 1 ? `1 key picked: ${KEY_LABEL.get(rc)} - changes save instantly.` :
+    // Say the blast radius before they touch a control, not after: there is no Save
+    // button to think twice at any more, so one nudge rewrites every selected key.
+    `${n} keys picked - any change writes to all ${n} instantly.`;
+  updateEnabled();
+}
+
+// The gauge draws the key's real travel, read from the device (axisRangeMax).
+// 3.4mm is only the fallback shown before a key has been read.
+let travelMm = 3.4;
+
+function drawGauge() {
+  const num = id => parseFloat(document.getElementById(id).value) || 0;
+  const rt = rtMode === 1;
+  // One mark either way: normal mode now has a single actuation point.
+  const trigger = rt ? num('rtFirstTouch') : num('normalPress');
+  const ticks = [];
+  for (let mm = 0; mm < travelMm - 0.05; mm += 0.5) ticks.push(mm);
+  ticks.push(travelMm); // the true bottom of this switch's travel, not a round number
+  let html = '<div class="gauge-track">';
+  // One block per 0.2mm of travel, lit down to the depth where the key fires.
+  const segs = Math.max(1, Math.round(travelMm / 0.2));
+  // Round to the nearest block, but never show an empty meter for a real trigger depth:
+  // a 0.1mm point is shallower than one 0.2mm block and would otherwise light nothing.
+  const litCount = trigger > 0 ? Math.max(1, Math.round((trigger / travelMm) * segs)) : 0;
+  for (let i = 0; i < segs; i++) {
+    html += `<div class="seg${i < litCount ? ' lit' : ''}" style="top:${(i / segs) * 100}%;height:${100 / segs}%"></div>`;
+  }
+  for (const mm of ticks) {
+    html += `<div class="tick" style="top:${(mm / travelMm) * 100}%"><span>${mm.toFixed(mm === travelMm ? 2 : 1)}</span></div>`;
+  }
+  const pct = Math.max(0, Math.min(100, (trigger / travelMm) * 100));
+  html += `<div class="mark" style="top:${pct}%"><span>${rt ? 'starts' : 'fires'} ${trigger.toFixed(2)}</span></div>`;
+  document.getElementById('gauge').innerHTML = html + '</div>';
+}
+
+for (const id of ['normalPress', 'rtFirstTouch', 'rtPress', 'rtRelease']) {
+  document.getElementById(id).addEventListener('input', drawGauge);
+  document.getElementById(id).addEventListener('change', drawGauge);
+}
+
+// normalRelease is absent on purpose: normal mode exposes one actuation point, and
+// readCfg derives the reset depth from it.
+const SLIDER_FIELDS = ['normalPress', 'rtFirstTouch', 'rtPress', 'rtRelease', 'pressDeadStroke', 'releaseDeadStroke'];
+// Depths span the key's travel; the two RT sensitivities are small deltas, so a
+// full-travel slider would squeeze their useful range into a few pixels.
+const DEPTH_FIELDS = ['normalPress', 'rtFirstTouch', 'pressDeadStroke', 'releaseDeadStroke'];
+
+function syncSliders() {
+  for (const id of SLIDER_FIELDS) {
+    const box = document.getElementById(id), slider = document.getElementById(id + '_r');
+    const v = parseFloat(box.value);
+    const span = DEPTH_FIELDS.includes(id) ? travelMm : 1;
+    // Never let the slider's range clamp a value the keyboard actually holds.
+    slider.max = Number.isFinite(v) ? Math.max(span, v) : span;
+    slider.value = box.value;
+  }
+}
+
+for (const id of SLIDER_FIELDS) {
+  const box = document.getElementById(id), slider = document.getElementById(id + '_r');
+  slider.addEventListener('input', () => { box.value = slider.value; drawGauge(); scheduleApply(); });
+  box.addEventListener('input', () => { slider.value = box.value; scheduleApply(); });
+  // Enter or blur means the typed value is final - no reason to sit out the debounce.
+  box.addEventListener('change', () => scheduleApply(0));
+}
+
+// Sidebar swaps the lower panel instead of stacking every section down the page.
+for (const btn of document.querySelectorAll('.navbtn')) {
+  btn.onclick = () => {
+    for (const b of document.querySelectorAll('.navbtn')) b.classList.toggle('active', b === btn);
+    for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== 'view-' + btn.dataset.view;
+    document.getElementById('viewTitle').textContent = btn.textContent;
+  };
+}
+document.querySelector('.navbtn').classList.add('active');
+
+// Every per-key control needs a target; with nothing selected they would write nowhere.
+const NEEDS_KEY = [...SLIDER_FIELDS, ...SLIDER_FIELDS.map(id => id + '_r')];
+function updateEnabled() {
+  const on = selected.size > 0;
+  for (const id of NEEDS_KEY) document.getElementById(id).disabled = !on;
+  for (const el of document.querySelectorAll('[data-needs-key]')) el.disabled = !on;
+  document.getElementById('gauge').classList.toggle('off', !on);
+}
+
+document.getElementById('selWasd').onclick = () => setSelection(['2-2', '3-1', '3-2', '3-3']);
+document.getElementById('selAll').onclick = () => setSelection(KEY_LAYOUT.map(([rc]) => rc));
+document.getElementById('selInvert').onclick = () => setSelection(KEY_LAYOUT.map(([rc]) => rc).filter(rc => !selected.has(rc)));
+document.getElementById('selNone').onclick = () => setSelection([]);
+
+const logEl = document.getElementById('log');
+function log(msg) {
+  logEl.textContent += msg + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function build64(bytes) {
+  const buf = new Uint8Array(64);
+  bytes.forEach((b, i) => buf[i] = b & 0xff);
+  return buf;
+}
+
+function u16le(mm) {
+  const v = Math.round(mm * 1000);
+  return [v & 0xff, (v >> 8) & 0xff];
+}
+
+function onInputReport(e) {
+  const data = new Uint8Array(e.data.buffer);
+  log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]');
+  if (waiters.length) waiters.shift()(data);
+}
+
+function pickControlDevice(devices) {
+  // The keyboard exposes several HID interfaces (media keys, etc).
+  // Only the one with an output report is the vendor control channel we can send commands to.
+  return devices.find(d => d.collections.some(c => c.outputReports?.length)) || devices[0];
+}
+
+async function useDevice(d) {
+  device = d;
+  if (!device.opened) await device.open();
+  device.addEventListener('inputreport', onInputReport);
+  const st = document.getElementById('status');
+  st.textContent = `Connected to ${device.productName}`;
+  st.classList.add('live');
+  log(`Connected to ${device.productName} (vid=0x${device.vendorId.toString(16)} pid=0x${device.productId.toString(16)})`);
+  // Configs first: which one is active decides what every later read returns.
+  await loadConfigs();
+  await fillFormFrom(selected.values().next().value);
+  await loadAllModes();
+}
+
+async function connect() {
+  try {
+    // Reuse a previously granted permission if we have one - avoids popping the
+    // OS device picker again after e.g. a polling-rate change re-enumerates the device.
+    const known = pickControlDevice(await navigator.hid.getDevices());
+    if (known) { await useDevice(known); return; }
+    const devices = await navigator.hid.requestDevice({ filters: [] });
+    if (!devices.length) { log('No device selected.'); return; }
+    await useDevice(pickControlDevice(devices));
+  } catch (err) {
+    log('Connect error: ' + err.message);
+  }
+}
+
+// Some settings (e.g. polling rate) make the keyboard briefly re-enumerate over USB -
+// that's expected, not a fault. Auto-reopen instead of leaving the tool stuck.
+navigator.hid.addEventListener('connect', async ({ device: d }) => {
+  if (device && d.vendorId === device.vendorId && d.productId === device.productId) {
+    log('Device re-enumerated, reconnecting...');
+    await useDevice(d);
+  }
+});
+
+// Responses are matched to requests in arrival order (see `waiters`), so two overlapping
+// exchanges would resolve into each other's waiters and silently return wrong data.
+// Auto-save writes, the connect-time mode scan and the colorize loop all run on their own
+// schedules now, so funnel every exchange through one chain that keeps a single one in flight.
+let ioChain = Promise.resolve();
+function sendAndWait(bytes, timeout = 1000) {
+  const run = () => sendAndWaitRaw(bytes, timeout);
+  const next = ioChain.then(run, run);
+  ioChain = next.catch(() => {});
+  return next;
+}
+
+async function sendAndWaitRaw(bytes, timeout = 1000) {
+  if (!device) { log('Not connected.'); return null; }
+  const payload = build64(bytes);
+  log('OUT [' + bytes.join(',') + ']');
+  const p = new Promise((resolve) => {
+    waiters.push(resolve);
+    setTimeout(() => {
+      const i = waiters.indexOf(resolve);
+      if (i !== -1) { waiters.splice(i, 1); resolve(null); }
+    }, timeout);
+  });
+  try {
+    if (!device.opened) await device.open();
+    await device.sendReport(0, payload);
+  } catch (err) {
+    log('Send error (device likely re-enumerating, try again shortly): ' + err.message);
+  }
+  return p;
+}
+
+document.getElementById('connect').onclick = connect;
+
+// The keyboard stores 4 independent configs. Every per-key performance value belongs
+// to the active one, so switching means everything on screen is stale.
+let configCount = 0, currentConfig = null;
+const configNames = new Map();
+
+async function getConfigName(id) {
+  const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.GetName, id]);
+  // 32 bytes of zero-padded UTF-8 at offset 4.
+  if (!res) return '';
+  return new TextDecoder('utf-8').decode(Uint8Array.from([...res.slice(4, 36)].filter(b => b !== 0))).trim();
+}
+
+function configLabel(id) {
+  return configNames.get(id) || `Config ${id + 1}`;
+}
+
+function renderConfigBar() {
+  const bar = document.getElementById('configBar');
+  bar.innerHTML = '';
+  if (!configCount) return;
+  bar.append(Object.assign(document.createElement('span'), { className: 'barlabel', textContent: 'CONFIG' }));
+  for (let i = 0; i < configCount; i++) {
+    const b = document.createElement('button');
+    b.className = 'cfgbtn' + (i === currentConfig ? ' active' : '');
+    b.textContent = configLabel(i);
+    b.title = configLabel(i);
+    b.onclick = () => switchConfig(i);
+    bar.appendChild(b);
+  }
+}
+
+async function loadConfigs() {
+  const list = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.List]);
+  configCount = list ? list[3] : 0;
+  const cur = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.Read]);
+  currentConfig = cur ? cur[3] : null;
+  for (let i = 0; i < configCount; i++) configNames.set(i, await getConfigName(i));
+  renderConfigBar();
+  log(`Configs: ${configCount}, active = ${configLabel(currentConfig)}`);
+}
+
+async function switchConfig(id) {
+  if (!device || id === currentConfig) return;
+  // A debounced write still pending belongs to the config we are leaving. Firing it
+  // after the switch would stamp the old form's values onto the config we just opened.
+  clearTimeout(writeTimer);
+  writeAgain = false;
+  saveState('Switching...', true);
+  const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.Switch, id]);
+  if (!res) { saveState('Switch failed', true); log(`Config switch to ${id}: no response`); return; }
+  currentConfig = res[3];
+  renderConfigBar();
+  if (res[3] !== id) log(`Config switch: asked for ${id}, device reports ${res[3]}`);
+  // Every per-key value on screen belongs to the config we just left, so re-read
+  // both the form and every keycap tag rather than showing the old config's numbers.
+  await fillFormFrom(selected.values().next().value);
+  await loadAllModes();
+  saveState(`Switched to ${configLabel(currentConfig)}`);
+}
+
+document.getElementById('getRate').onclick = async () => {
+  const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Read]);
+  if (res) log('Polling rate value = ' + res[3]);
+};
+
+document.getElementById('setRate').onclick = async () => {
+  const rate = parseInt(document.getElementById('rate').value, 10);
+  const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Write, rate]);
+  if (res) log('Set polling rate result, echoed value = ' + res[3]);
+};
+
+// axisFields must come from a live getPerformance() on the same key.
+// Zeroing them (instead of preserving) wipes that key's stored axis calibration on real hardware.
+function perfSetPacket(row, col, cfg, axisFields) {
+  return [
+    CATEGORY.Performance, PERF_SUB.SetPerformance, row, col, cfg.mode,
+    ...u16le(cfg.normalPress),
+    ...u16le(cfg.normalRelease),
+    ...u16le(cfg.rtFirstTouch),
+    ...u16le(cfg.rtPress),
+    ...u16le(cfg.rtRelease),
+    ...u16le(cfg.pressDeadStroke),
+    ...u16le(cfg.releaseDeadStroke),
+    axisFields.axis, axisFields.calibrate,
+    ...u16le16bit(axisFields.axisV2Id),
+    ...u16le16bit(axisFields.axisRangeMax),
+    ...u16le16bit(axisFields.axisCoefficient),
+  ];
+}
+
+// axisV2Id/axisRangeMax/axisCoefficient are raw u16 counts, not mm values - no *1000 scaling.
+function u16le16bit(v) {
+  return [v & 0xff, (v >> 8) & 0xff];
+}
+
+async function getPerformanceRaw(row, col, timeout = 1000) {
+  const res = await sendAndWait([CATEGORY.Performance, PERF_SUB.GetPerformance, row, col], timeout);
+  if (!res) return null;
+  return {
+    mode: res[4],
+    normalPress: (res[5] | res[6] << 8) / 1000,
+    normalRelease: (res[7] | res[8] << 8) / 1000,
+    rtFirstTouch: (res[9] | res[10] << 8) / 1000,
+    rtPress: (res[11] | res[12] << 8) / 1000,
+    rtRelease: (res[13] | res[14] << 8) / 1000,
+    pressDeadStroke: (res[15] | res[16] << 8) / 1000,
+    releaseDeadStroke: (res[17] | res[18] << 8) / 1000,
+    axis: res[19],
+    calibrate: res[20],
+    axisV2Id: res[21] | res[22] << 8,
+    axisRangeMax: res[23] | res[24] << 8,
+    axisCoefficient: res[25] | res[26] << 8,
+  };
+}
+
+function readCfg() {
+  const trigger = parseFloat(document.getElementById('normalPress').value);
+  return {
+    mode: rtMode,
+    normalPress: trigger,
+    // Normal mode shows one actuation point, so the reset depth tracks it - press ==
+    // release is what the firmware ships with. Leaving a stale normalRelease behind
+    // would put the reset deeper than the fire point and the two thresholds cross over.
+    normalRelease: trigger,
+    rtFirstTouch: parseFloat(document.getElementById('rtFirstTouch').value),
+    rtPress: parseFloat(document.getElementById('rtPress').value),
+    rtRelease: parseFloat(document.getElementById('rtRelease').value),
+    pressDeadStroke: parseFloat(document.getElementById('pressDeadStroke').value),
+    releaseDeadStroke: parseFloat(document.getElementById('releaseDeadStroke').value),
+  };
+}
+
+document.getElementById('getPerf').onclick = async () => {
+  if (!selected.size) { log('No keys selected.'); return; }
+  for (const rc of selected) {
+    const [row, col] = rc.split('-').map(Number);
+    const cur = await getPerformanceRaw(row, col);
+    log(cur ? `row=${row} col=${col} ` + JSON.stringify(cur) : `row=${row} col=${col}: no response`);
+  }
+};
+
+let saveTimer = null;
+function saveState(msg, busy) {
+  const el = document.getElementById('saveState');
+  el.textContent = msg;
+  el.classList.toggle('busy', !!busy);
+  clearTimeout(saveTimer);
+  if (!busy) saveTimer = setTimeout(() => { el.textContent = ''; }, 2500);
+}
+
+// There is no Save button: every edit writes itself. Dragging a slider fires `input`
+// continuously, so wait for the drag to settle and write once, and never let two runs
+// overlap - `writeAgain` folds anything that arrives mid-write into a single re-run.
+let writeTimer = null, writing = false, writeAgain = false;
+function scheduleApply(delay = 250) {
+  clearTimeout(writeTimer);
+  writeTimer = setTimeout(applyNow, delay);
+}
+
+async function applyNow() {
+  if (!device || !selected.size) return;
+  const cfg = readCfg();
+  // An empty box parses to NaN and u16le(NaN) encodes as 0, which would write 0.00mm.
+  // Mid-typing that is normal rather than an error, so just wait for a real number.
+  if (Object.values(cfg).some(v => !Number.isFinite(v))) return;
+  if (writing) { writeAgain = true; return; }
+  writing = true;
+  saveState('Saving...', true);
+  let ok = 0;
+  const failed = [];
+  try {
+    for (const rc of selected) {
+      const [row, col] = rc.split('-').map(Number);
+      // Read this key's current axis calibration first so Set doesn't zero it out.
+      const cur = await getPerformanceRaw(row, col);
+      if (!cur) { failed.push(`${rc}: no response`); continue; }
+      const res = await sendAndWait(perfSetPacket(row, col, cfg, cur), 500);
+      if (!res) { failed.push(`${rc}: timed out`); continue; }
+      // The echo only proves the packet arrived. The firmware silently ignores values it
+      // rejects, so read back and diff - otherwise a refused write still counts as success.
+      const after = await getPerformanceRaw(row, col);
+      if (!after) { failed.push(`${rc}: read-back failed`); continue; }
+      // The tag now shows what the key actually holds, correcting the optimistic flip.
+      setKeyMode(rc, after.mode);
+      const bad = Object.keys(cfg).filter(k => Math.abs(after[k] - cfg[k]) > 0.0005);
+      if (bad.length) failed.push(`${rc}: ` + bad.map(k => `${k}=${after[k]} (wanted ${cfg[k]})`).join(', '));
+      else ok++;
+    }
+  } finally {
+    writing = false;
+  }
+  // The form is deliberately not refilled from the read-back: it would yank the slider
+  // out from under a drag. A rejected value simply stays visible and gets retried.
+  // One audit line per burst, not per key: with 64 keys selected the per-key detail
+  // buries everything else, but a silent write leaves no record of what touched the board.
+  const what = rtMode ? `RT on, first ${cfg.rtFirstTouch}mm, press ${cfg.rtPress}, release ${cfg.rtRelease}`
+                      : `RT off, fires ${cfg.normalPress}mm`;
+  log(`Auto-save -> ${ok} key${ok === 1 ? '' : 's'}${failed.length ? `, ${failed.length} FAILED` : ''} (${what}, dead zone ${cfg.pressDeadStroke}/${cfg.releaseDeadStroke})`);
+  if (failed.length) {
+    saveState(`${failed.length} refused`, true);
+    failed.forEach(f => log('REJECTED ' + f));
+  } else {
+    saveState(`Saved ${ok} key${ok === 1 ? '' : 's'}`);
+  }
+  if (writeAgain) { writeAgain = false; scheduleApply(0); }
+}
+
+// Direct-drive lighting: fire-and-forget frames, up to 15 keys (4 bytes each) per 64-byte packet.
+function directDrivePacket(area, colorChunk, packetIndex) {
+  const bytes = [CATEGORY.Lighting, LIGHT_SUB.DirectDrive, area, packetIndex];
+  colorChunk.forEach(c => bytes.push(c.B, c.G, c.R, c.isCustom ? 255 : 0));
+  return bytes;
+}
+
+async function scanModeColors() {
+  const rows = 6, cols = 21;
+  const colors = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      // Short timeout - most row/col slots in this grid have no physical key and never respond.
+      const cur = await getPerformanceRaw(row, col, 250);
+      colors.push(cur
+        ? (cur.mode === 1 ? { R: 255, G: 0, B: 0, isCustom: true } : { R: 255, G: 255, B: 255, isCustom: true })
+        : { R: 0, G: 0, B: 0, isCustom: false });
+    }
+  }
+  return colors;
+}
+
+async function sendColorFrame(colors) {
+  for (let i = 0; i < colors.length; i += 15) {
+    const chunk = colors.slice(i, i + 15);
+    const payload = build64(directDrivePacket(AREA.Keyboard, chunk, i / 15));
+    await device.sendReport(0, payload);
+  }
+}
+
+// DirectDrive is a transient host-driven override - the firmware reverts to its stored
+// effect a few seconds after the last frame, so this keeps re-sending to hold the colors.
+let colorizeInterval = null;
+document.getElementById('colorize').onclick = async () => {
+  if (colorizeInterval) {
+    clearInterval(colorizeInterval);
+    colorizeInterval = null;
+    document.getElementById('colorize').textContent = 'Colorize by mode';
+    log('Colorize stopped.');
+    return;
+  }
+  if (!device) { log('Not connected.'); return; }
+  log('Scanning all keys...');
+  const colors = await scanModeColors();
+  await sendColorFrame(colors);
+  log('Colorize started: holding colors, resending every 1.5s.');
+  document.getElementById('colorize').textContent = 'Stop colorizing';
+  colorizeInterval = setInterval(() => sendColorFrame(colors).catch(err => log('Refresh error: ' + err.message)), 1500);
+};
+
+renderKeyboard();
+syncSliders();
+setRtMode(0);
+</script>
+</body>
+</html>
