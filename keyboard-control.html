@@ -203,7 +203,6 @@
   <h1>AE64 PRO TUNER</h1>
   <span class="spacer"></span>
   <p id="status">Not connected</p>
-  <button id="connect">Connect keyboard</button>
 </header>
 
 <div class="appbody">
@@ -230,7 +229,7 @@
     <div id="kbEmpty">
       <div class="kbicon">&#9000;</div>
       <p>No keyboard connected.</p>
-      <button id="connect2">Connect keyboard</button>
+      <button id="connect">Connect keyboard</button>
     </div>
     <div id="kbTools">
       <button id="selWasd">WASD</button>
@@ -614,6 +613,7 @@ for (const btn of document.querySelectorAll('.navbtn')) {
       btn.dataset.view === 'performance' ? 'Trigger settings' : btn.textContent;
     // Polling only runs while its view is on screen: a loop left running competes with
     // auto-save for the io chain and keeps the device busy for nothing.
+    if (btn.dataset.view === 'log') fitLog();
     setTravelTest(btn.dataset.view === 'traveltest');
     if (btn.dataset.view !== 'calibration') {
       const arm = document.getElementById('calStart');
@@ -644,6 +644,26 @@ function log(msg) {
   logEl.textContent += msg + '\n';
   logEl.scrollTop = logEl.scrollHeight;
 }
+
+// A hidden element has no layout, so every scroll-to-bottom while the Log view sat in
+// the background did nothing - opening it landed on the oldest lines instead of the
+// newest. Re-pin it the moment it becomes visible.
+function scrollLogToEnd() {
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// The box was 6.4 lines tall, so a sliver of a cut-off line always showed at one edge
+// and read as a broken panel. Snap its height to a whole number of lines. Has to run
+// while the view is visible - a hidden element measures zero.
+function fitLog() {
+  const cs = getComputedStyle(logEl);
+  const line = parseFloat(cs.lineHeight);
+  const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const avail = logEl.parentElement.clientHeight - pad;
+  if (line > 0 && avail > line) logEl.style.height = (Math.floor(avail / line) * line + pad) + 'px';
+  scrollLogToEnd();
+}
+addEventListener('resize', () => { if (!document.getElementById('view-log').hidden) fitLog(); });
 
 function build64(bytes) {
   const buf = new Uint8Array(64);
@@ -741,7 +761,6 @@ async function sendAndWaitRaw(bytes, timeout = 1000) {
 }
 
 document.getElementById('connect').onclick = connect;
-document.getElementById('connect2').onclick = connect;
 
 // Unplugging left the board on screen looking live, and every poll silently timing out.
 navigator.hid.addEventListener('disconnect', ({ device: d }) => {
