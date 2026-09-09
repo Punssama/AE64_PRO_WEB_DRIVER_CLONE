@@ -162,7 +162,11 @@
   .readout .muted { color: var(--muted); }
   /* Calibration rewrites every key's stored axis data, so its screen is styled to be
      read before it is clicked, not after. */
-  .warn { border: 2px solid var(--ink); background: var(--accent); padding: 8px 10px; margin: 0 0 12px; }
+  .warn { border: 2px solid var(--ink); background: var(--accent); padding: 7px 10px; margin: 0 0 11px; }
+  /* Button and status share a row: giving the status its own line pushed this view 8px
+     past the 142px the centre panel has. */
+  .calrow { display: flex; align-items: center; gap: 14px; }
+  .calrow .hint { margin: 0; }
   .danger { background: var(--accent); }
   .danger[data-armed="1"] { background: var(--ink); color: var(--accent); }
   /* The two groups are only there to be shown and hidden - their fields must still be
@@ -285,9 +289,11 @@
     <div class="view" id="view-calibration" hidden>
       <p class="warn"><b>Replaces the stored calibration on every key.</b> Press every key fully
         down and release, then Finish. Stopping halfway leaves keys half-learned - just run it again.</p>
-      <p class="hint" id="calState">Not running.</p>
-      <button id="calStart" class="danger" data-armed="0">Start calibration</button>
-      <button id="calFinish" hidden>Finish calibration</button>
+      <div class="calrow">
+        <button id="calStart" class="danger" data-armed="0">Start calibration</button>
+        <button id="calFinish" hidden>Finish calibration</button>
+        <span class="hint" id="calState">Not running.</span>
+      </div>
     </div>
 
     <div class="view" id="view-rate" hidden>
@@ -891,7 +897,7 @@ function showTravelReadout(rc, raw, full) {
 }
 
 function clearTravelPaint() {
-  for (const el of keyEl.values()) el.querySelector('.lvl').style.height = '0';
+  for (const el of keyEl.values()) el.querySelector('.lvl').style.height = '0%';
   const live = document.getElementById('liveMark');
   if (live) live.hidden = true;
 }
