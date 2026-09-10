@@ -123,7 +123,11 @@
   #kb .kb-key .led { position: absolute; inset: 0; pointer-events: none; }
   /* An effect can put any colour under the legend, including near-black, so while the
      preview runs the legend goes white with a shadow - readable on all of them. */
+  /* The legend flips with the LED under it: white on a dark key, near-black on a bright
+     one. A fixed white legend vanished on white and yellow effects. The shadow flips too,
+     or a dark legend on a bright key sits in its own muddy halo. */
   #kb.lit .kb-key .cap { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85); }
+  #kb.lit .kb-key.brightled .cap { color: #14201b; text-shadow: 0 1px 2px rgba(255,255,255,.7); }
   #kb .kb-key:hover { background: var(--accent); }
   #kb .kb-key.selected { background: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
@@ -1738,6 +1742,11 @@ async function buildStrip() {
   log('Decorative strip: ' + stripLeds + ' LEDs.');
 }
 
+// Perceived brightness, not the plain average: green reads far lighter than blue at the
+// same value. On an average, pure green (85) would count as dark and keep a white legend
+// on a nearly-white key, while the eye sees green as one of the brightest hues.
+const isBright = (R, G, B) => 0.299 * R + 0.587 * G + 0.114 * B > 140;
+
 async function readFrame(area) {
   const out = [];
   for (let i = 0; i < (ledPackets[area] || 0); i++) {
@@ -1745,7 +1754,8 @@ async function readFrame(area) {
     if (!r) return null;
     for (let k = 0; k < 15; k++) {
       const o = 4 + k * 4;
-      out.push('rgb(' + r[o + 2] + ',' + r[o + 1] + ',' + r[o] + ')');
+      const R = r[o + 2], G = r[o + 1], B = r[o];
+      out.push({ css: 'rgb(' + R + ',' + G + ',' + B + ')', bright: isBright(R, G, B) });
     }
   }
   return out;
@@ -1759,7 +1769,11 @@ async function ledLoop() {
     try {
       const kbFrame = await readFrame(AREA.Keyboard);
       if (!ledRunning) break;
-      if (kbFrame) for (const [rc, el] of keyEl) el.firstChild.style.background = kbFrame[ledIndex.get(rc)] || '';
+      if (kbFrame) for (const [rc, el] of keyEl) {
+        const f = kbFrame[ledIndex.get(rc)];
+        el.firstChild.style.background = f ? f.css : '';
+        el.classList.toggle('brightled', !!f && f.bright);
+      }
       if (stripLeds) {
         const dcFrame = await readFrame(AREA.Decorate1);
         if (!ledRunning) break;
@@ -1770,11 +1784,11 @@ async function ledLoop() {
           // trims the spare cells the first time a frame actually lights up, and never
           // shrinks after that.
           let lit = 0;
-          dcFrame.forEach((c, k) => { if (c !== 'rgb(0,0,0)') lit = k + 1; });
+          dcFrame.forEach((c, k) => { if (c.css !== 'rgb(0,0,0)') lit = k + 1; });
           if (lit && lit < stripLeds) { stripLeds = lit; log('Decorative strip: ' + lit + ' LEDs.'); }
           for (let k = 0; k < strip.children.length; k++) {
             strip.children[k].hidden = k >= stripLeds;
-            strip.children[k].style.background = dcFrame[k];
+            strip.children[k].style.background = dcFrame[k].css;
           }
         }
       }
@@ -1789,7 +1803,10 @@ async function ledLoop() {
 }
 
 function ledClear() {
-  for (const el of keyEl.values()) el.firstChild.style.background = '';
+  for (const el of keyEl.values()) {
+    el.firstChild.style.background = '';
+    el.classList.remove('brightled');
+  }
   document.getElementById('kb').classList.remove('lit');
 }
 
@@ -1986,6 +2003,11 @@ if (location.search.includes('selftest')) {
   console.assert(hidName(58) === 'F1' && hidName(69) === 'F12', 'the function-key run');
   console.assert(hidName(229) === 'Right Shift' && hidName(76) === 'Delete', 'the two the layout got wrong');
   console.assert(hidName(61697) === undefined, 'a special code is left to the fallback');
+  // Legend contrast. Green is the one a plain average gets wrong.
+  console.assert(isBright(255, 255, 255) && isBright(255, 255, 0), 'white and yellow take a dark legend');
+  console.assert(isBright(0, 255, 0), 'so does pure green, which an average would call dark');
+  console.assert(!isBright(255, 0, 0) && !isBright(0, 0, 255), 'red and blue keep a white legend');
+  console.assert(!isBright(12, 31, 25), 'an unlit key keeps a white legend');
   console.log('selftest done');
 }
 
