@@ -183,11 +183,13 @@
   .calrow { display: flex; align-items: center; gap: 14px; }
   .calrow .hint { margin: 0; }
 
-  /* Lighting: every setting here is a small set of fixed steps (4 brightness levels,
-     5 speeds, 2 directions, 8 palette slots), so buttons say more than sliders would. */
+  /* Lighting: direction (2) and the palette (8 slots) are small fixed sets, so they are
+     buttons. Brightness and speed turned out to be 0-100, and the 23 effects are a
+     dropdown - both too many to spell out as buttons in this panel. */
   .lightrow { display: flex; align-items: center; gap: 14px; margin-bottom: 11px; }
   .lightrow .toggle { margin-bottom: 0; width: 200px; flex: none; }
   .lightrow .hint { margin: 0; }
+  .lightrow select { padding: 4px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
   .pick { display: flex; gap: 4px; flex-wrap: wrap; }
   .pick button { padding: 3px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); min-width: 34px; }
   .pick button.on, .pick button.on:hover { background: var(--ink); color: var(--accent); }
@@ -347,7 +349,7 @@
         <button id="lightToggle" class="toggle" aria-pressed="false">
           <span>Lighting</span><span class="tog">OFF</span>
         </button>
-        <div class="pick" id="lightModes"></div>
+        <select id="lightModes" disabled></select>
         <span class="hint" id="lightNote">Effects are stored in the keyboard - this picks one.</span>
       </div>
       <div class="fields">
@@ -397,10 +399,10 @@ const CALIB = { Open: 0, Close: 1 };
 // The write echoes the resulting state back in the same layout, so it can be verified.
 const LIGHT_OP = { Read: 1, Write: 2 };
 const LIGHT_CFG = { Base: 0, Palette: 1, ColorCorrection: 2 };
-const LIGHT_SUB_DIRECT = 5;   // Va.DirectDrive - a subcommand, not a Base config value
 const LIGHT_OPEN = { Close: 0, Open: 1 };
-// The official UI labels the firmware's effects L1..L23; only the first three for now.
-const LIGHT_MODES = [0, 1, 2];
+// The official UI labels the firmware's effects L1..L23 and its own list is a plain
+// id 0..22 - no names, no gaps - so the mode byte is just the index.
+const LIGHT_MODE_COUNT = 23;
 // The SDK carries Brightness1..4 and Speed1..5 enums, but THIS firmware does not use
 // them: it reports 100 for both and stores whatever byte you send (200 echoes back as
 // 200, unclamped). So they are percentages, and the UI has to do the clamping - the
@@ -654,8 +656,6 @@ for (const btn of document.querySelectorAll('.navbtn')) {
     // auto-save for the io chain and keeps the device busy for nothing.
     if (btn.dataset.view === 'log') fitLog();
     if (btn.dataset.view === 'light' && device) loadLighting();
-    // Reactive drives the LEDs from here; leaving the view has to hand them back.
-    if (btn.dataset.view !== 'light') setReactive(false);
     setTravelTest(btn.dataset.view === 'traveltest');
     if (btn.dataset.view !== 'calibration') {
       const arm = document.getElementById('calStart');
@@ -816,7 +816,6 @@ navigator.hid.addEventListener('disconnect', ({ device: d }) => {
   st.classList.remove('live');
   configCount = 0; currentConfig = null; configNames.clear();
   lightState = null; palette = [];
-  reactiveRunning = false;
   renderConfigPicker();
   renderLighting();
   updateKbVisibility();
@@ -1391,6 +1390,12 @@ function pickRow(el, count, current, label, onPick) {
   }
 }
 
+// 23 effects will not fit a row of buttons in a 142px panel, so this one control is a
+// dropdown. The options never change - only the selection does.
+const lightModeSel = document.getElementById('lightModes');
+for (let i = 0; i < LIGHT_MODE_COUNT; i++) lightModeSel.add(new Option('L' + (i + 1), i));
+lightModeSel.onchange = () => setLighting({ mode: +lightModeSel.value });
+
 function renderLighting() {
   const st = lightState;
   const btn = document.getElementById('lightToggle');
@@ -1398,16 +1403,9 @@ function renderLighting() {
   btn.querySelector('.tog').textContent = st && st.open ? 'ON' : 'OFF';
   btn.disabled = !st;
 
-  // Reactive is a host override, not a stored effect, so it wins the highlight while
-  // it runs - otherwise the row would claim a firmware effect is showing when it isn't.
-  pickRow(document.getElementById('lightModes'), LIGHT_MODES.length + 1,
-          reactiveRunning ? LIGHT_MODES.length : (st ? LIGHT_MODES.indexOf(st.mode) : -1),
-          i => (i === LIGHT_MODES.length ? 'Reactive' : 'L' + (LIGHT_MODES[i] + 1)),
-          i => {
-            if (i === LIGHT_MODES.length) { setReactive(true); return; }
-            setReactive(false);
-            setLighting({ mode: LIGHT_MODES[i] });
-          });
+  lightModeSel.disabled = !st;
+  // A mode the dropdown does not list would leave a stale name showing, so blank it.
+  lightModeSel.value = st && st.mode < LIGHT_MODE_COUNT ? st.mode : '';
   for (const [id, key] of [['lightLum', 'luminance'], ['lightSpeed', 'speed']]) {
     const box = document.getElementById(id), slider = document.getElementById(id + '_r');
     box.disabled = slider.disabled = !st;
@@ -1455,79 +1453,6 @@ for (const [id, key] of [['lightLum', 'luminance'], ['lightSpeed', 'speed']]) {
   };
   slider.addEventListener('input', () => { box.value = slider.value; push(+slider.value); });
   box.addEventListener('input', () => { slider.value = box.value; push(+box.value); });
-}
-
-// ---- "Reactive": a mode of my own -------------------------------------------------
-// The firmware's own effects are blind to how far a key is pressed - they only ever see
-// down or up. This tool already reads real travel for every key many times a second, so
-// it can light each key by its own depth. That is the one effect the keyboard cannot do
-// by itself, which is why it is the one worth writing.
-//
-// DirectDrive is a transient host override: the firmware reverts to its stored effect a
-// few seconds after the last frame, so this has to keep sending - and stopping needs no
-// cleanup, the board simply goes back to L1/L2/L3 on its own.
-function directDrivePacket(area, colorChunk, packetIndex) {
-  const bytes = [CATEGORY.Lighting, LIGHT_SUB_DIRECT, area, packetIndex];
-  colorChunk.forEach(c => bytes.push(c.B, c.G, c.R, c.isCustom ? 255 : 0));
-  return bytes;
-}
-
-async function sendColorFrame(colors) {
-  // 15 keys per 64-byte packet, over the flattened 6 x 21 grid the LED map expects.
-  for (let i = 0; i < colors.length; i += 15) {
-    const payload = build64(directDrivePacket(AREA.Keyboard, colors.slice(i, i + 15), i / 15));
-    await device.sendReport(0, payload);
-  }
-}
-
-// Idle is a dim green, bottoming out is hot amber. The curve is deliberately not linear:
-// most of a press happens in the first fraction of a millimetre of intent, and a linear
-// ramp makes light touches look like nothing is happening.
-function reactiveColor(t) {
-  const k = Math.pow(Math.max(0, Math.min(1, t)), 0.6);
-  const lerp = (a, b) => Math.round(a + (b - a) * k);
-  return { R: lerp(6, 255), G: lerp(70, 190), B: lerp(48, 30), isCustom: true };
-}
-
-let reactiveRunning = false;
-async function reactiveLoop() {
-  const frame = [];
-  for (let i = 0; i < 6 * 21; i++) frame.push({ R: 0, G: 0, B: 0, isCustom: false });
-  while (reactiveRunning && device) {
-    for (const row of KB_ROWS) {
-      if (!reactiveRunning) break;
-      const r = await getAxisRow(AXIS_MODE.Route, row, 300);
-      if (!r) continue;
-      for (let col = 0; col < 21; col++) {
-        const rc = row + '-' + col;
-        if (!keyEl.has(rc)) continue;
-        const full = keyTravel.get(rc) || 3390;
-        frame[row * 21 + col] = reactiveColor(r.data[col] / full);
-      }
-    }
-    if (!reactiveRunning) break;
-    try {
-      await sendColorFrame(frame);
-    } catch (err) {
-      log('Reactive stopped: ' + err.message);
-      reactiveRunning = false;
-    }
-    await new Promise(r => setTimeout(r, 25));
-  }
-  renderLighting();
-}
-
-function setReactive(on) {
-  if (on === reactiveRunning) return;
-  reactiveRunning = on;
-  if (on) {
-    if (!device) { reactiveRunning = false; return; }
-    log('Reactive lighting on - keys light by how deep you press them.');
-    reactiveLoop();
-  } else {
-    log('Reactive lighting off - the keyboard goes back to its own effect in a moment.');
-  }
-  renderLighting();
 }
 
 renderKeyboard();
