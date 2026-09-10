@@ -765,10 +765,23 @@ function u16le(mm) {
   return [v & 0xff, (v >> 8) & 0xff];
 }
 
+// Every reply this firmware sends echoes the leading bytes of the request: category,
+// subcommand, then the two selector bytes (row/col, area/config, area/packet index).
+// That echo is the only way to tell whose reply a report is.
+const echoes = (head, data) => head.every((b, i) => data[i] === b);
+
 function onInputReport(e) {
   const data = new Uint8Array(e.data.buffer);
   log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]');
-  if (waiters.length) waiters.shift()(data);
+  // Hand the reply to the request that actually asked for it, rather than to whoever
+  // is next in the queue. Reports arrive here that nobody in this page asked for: the
+  // keyboard emits some by itself ([2,8,...] and [2,10,...] turn up right after
+  // connect), and ANY other tab holding the same device open gets its replies
+  // delivered here too - HID input reports go to every page that has it open.
+  // Arrival-order matching gave those to the wrong caller, which is how a second tab
+  // painted entire LED frames onto the wrong keys and made the board flicker.
+  const i = waiters.findIndex(w => echoes(w.head, data));
+  if (i !== -1) waiters.splice(i, 1)[0].resolve(data);
 }
 
 // The AE64 Pro's vendor id. Filtering on it is what keeps every other HID device on the
@@ -859,8 +872,10 @@ navigator.hid?.addEventListener('connect', async ({ device: d }) => {
   }
 });
 
-// Responses are matched to requests in arrival order (see `waiters`), so two overlapping
-// exchanges would resolve into each other's waiters and silently return wrong data.
+// Replies are matched by their echoed header now (see `onInputReport`), so a stray report
+// can no longer be handed to the wrong caller. Two overlapping exchanges of the SAME
+// command still would though - two ReadBack reads of the same packet echo the same four
+// bytes - so keep one exchange in flight.
 // Auto-save writes, the connect-time mode scan and the travel poll all run on their own
 // schedules now, so funnel every exchange through one chain that keeps a single one in flight.
 let ioChain = Promise.resolve();
@@ -875,10 +890,12 @@ async function sendAndWaitRaw(bytes, timeout = 1000) {
   if (!device) { log('Not connected.'); return null; }
   const payload = build64(bytes);
   log('OUT [' + bytes.join(',') + ']');
+  const head = bytes.slice(0, 4);
   const p = new Promise((resolve) => {
-    waiters.push(resolve);
+    const w = { head, resolve };
+    waiters.push(w);
     setTimeout(() => {
-      const i = waiters.indexOf(resolve);
+      const i = waiters.indexOf(w);
       if (i !== -1) { waiters.splice(i, 1); resolve(null); }
     }, timeout);
   });
@@ -1728,6 +1745,12 @@ if (location.search.includes('selftest')) {
   const odd = fake(0x9999, true);
   console.assert(pickControlDevice([odd]) === null, 'unknown vendor refused by default');
   console.assert(pickControlDevice([odd], true) === odd, 'unknown vendor allowed via the escape hatch');
+  // The reply matcher, against reports actually seen on this keyboard.
+  const rep = (...b) => Uint8Array.from(b);
+  console.assert(echoes([4, 1, 4, 3], rep(4, 1, 4, 3, 0, 196, 9)), 'the matching reply is accepted');
+  console.assert(!echoes([5, 1, 0, 0], rep(5, 1, 0, 2, 19, 17, 20)), 'a reply for another config is refused');
+  console.assert(!echoes([2, 3, 0], rep(2, 8, 0, 2, 0, 20)), 'an unsolicited report is refused');
+  console.assert(!echoes([5, 3, 0, 2], rep(5, 3, 0, 4)), 'another packet index is refused');
   console.log('selftest done');
 }
 
