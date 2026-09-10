@@ -772,7 +772,11 @@ for (const btn of document.querySelectorAll('.navbtn')) {
       arm.dataset.armed = '0';
       arm.textContent = 'Restore ' + (remapLayer ? 'FN layer' : 'base layer');
     }
+    // Every view, not just the others: entering remap on the FN tab has to repaint too.
     paintCaps();
+    // saveState(msg, true) never times out, so a refusal from one view would sit in the
+    // status bar of every other one. Leaving the view is as good as acknowledging it.
+    saveState('');
     ledPreview(btn.dataset.view === 'light' && !!device);
     setTravelTest(btn.dataset.view === 'traveltest');
     if (btn.dataset.view !== 'calibration') {
@@ -1001,7 +1005,7 @@ function resetDevice(msg) {
   configCount = 0; currentConfig = null; configNames.clear();
   lightState = null; palette = []; lightAreas = []; lightArea = AREA.Keyboard;
   lightStates = {}; stripLeds = 0; ledPreview(false);
-  defaultRows = null; curRows = null; codeLabel.clear();
+  codeLabel.clear();
   for (const k of Object.keys(layerCache)) delete layerCache[k];
   paintCaps();
   renderConfigPicker();
@@ -1906,8 +1910,11 @@ function hidName(code) {
 // what the factory layout says sits at that position.
 const codeLabel = new Map();
 const keyName = code => hidName(code) || codeLabel.get(code) || ('code ' + code);
-let defaultRows = null;   // the factory layout, kept because it is the way back
-let curRows = null;      // what each key sends right now, cached so drawing never awaits
+// Always addressed by layer. An earlier version kept `curRows`/`defaultRows` pointing at
+// whichever layer was loaded last, which is how the FN layer stayed on the board after
+// leaving the remap view: nothing in a pointer says which layer it is for.
+const layerDef = L => (layerCache[L] || {}).def;
+const layerCur = L => (layerCache[L] || {}).cur;
 // Which layer is being edited. 0 is the key on its own, 1 is what Fn+key does - the
 // vendor's page calls the switch FN. Putting a function on layer 0 replaces the key for
 // good, which is why media keys belong on layer 1 and did not before.
@@ -1956,8 +1963,6 @@ async function loadKeymap() {
     layerCache[L] = { def: rows, cur: null };
   }
   const rows = layerCache[L].def;
-  defaultRows = rows;
-  curRows = layerCache[L].cur;
   // Fallback names only, for codes the standard table does not cover.
   for (const [rc, label] of KEY_LABEL) {
     const [r, c] = rc.split('-').map(Number);
@@ -2063,7 +2068,7 @@ async function refreshKeymap() {
     rows.push(row);
   }
   if (layerCache[L]) layerCache[L].cur = rows;
-  if (L === remapLayer) { curRows = rows; paintCaps(); }
+  if (L === remapLayer) paintCaps();
   return true;
 }
 
@@ -2085,26 +2090,28 @@ function capFor(code, def, layer, printed) {
 }
 
 function paintCaps() {
+  // Outside the remap view the board is a keyboard again, whatever layer was last edited.
+  const L = document.getElementById('view-remap').hidden ? 0 : remapLayer;
+  const cur = layerCur(L), def0 = layerDef(L);
   for (const [rc, el] of keyEl) {
     const [r, c] = rc.split('-').map(Number);
-    const code = curRows && curRows[r] ? curRows[r][c] : 0;
-    const def = defaultRows && defaultRows[r] ? defaultRows[r][c] : 0;
+    const code = cur && cur[r] ? cur[r][c] : 0;
+    const def = def0 && def0[r] ? def0[r][c] : 0;
     // Not `code &&`: on the base layer, nothing (code 0) is a real assignment and the one
     // that most needs marking - a silent key looks broken rather than deliberate.
-    const moved = remapLayer === 0 ? !!(def && code !== def) : code !== def;
+    const moved = L === 0 ? !!(def && code !== def) : code !== def;
     const fn = SPECIAL_BY_CODE.get(code);
     el.title = fn ? fn.name : '';
-    el.children[2].textContent = capFor(code, def, remapLayer, KEY_LABEL.get(rc));
+    el.children[2].textContent = capFor(code, def, L, KEY_LABEL.get(rc));
     el.classList.toggle('remapped', moved);
     // On the FN layer a key with nothing behind Fn steps back rather than vanishing.
-    el.classList.toggle('nofn', remapLayer !== 0 && !code);
+    el.classList.toggle('nofn', L !== 0 && !code);
   }
 }
 
 async function setRemapLayer(n) {
   if (n === remapLayer) return;
   remapLayer = n;
-  defaultRows = curRows = null;
   renderRemap();                       // instantly, at the right size
   paintCaps();
   if (device && await loadKeymap()) {
@@ -2116,7 +2123,6 @@ async function setRemapLayer(n) {
       log('Remap: the FN layer came back identical to the base layer, so this keyboard may not have one. Staying on the Keys tab rather than risk overwriting real keys.');
       saveState('No separate FN layer', true);
       remapLayer = 0;
-      defaultRows = curRows = null;
       if (await loadKeymap()) await refreshKeymap();
       // Put the tab back too, or the UI claims to be somewhere it is not.
       document.querySelector('#view-remap [data-tab="rk"]').click();
@@ -2139,7 +2145,8 @@ function renderRemap() {
                                                 : 'Drag a key onto the board above, or pick one key first.';
   else {
     const [r, c] = rc.split('-').map(Number);
-    code = curRows && curRows[r] ? curRows[r][c] : -1;
+    const cur = layerCur(remapLayer);
+    code = cur && cur[r] ? cur[r][c] : -1;
     who.textContent = (remapLayer ? 'Fn + ' : '') + KEY_LABEL.get(rc) + ' sends: ' + keyName(code);
   }
   const arm = document.getElementById('remapDefaults');
@@ -2175,7 +2182,8 @@ async function assignTo(rc, code) {
     setSelection([]);
   }
   // Believe the echo, not the request, and repaint from it.
-  if (curRows && curRows[r]) { curRows[r][c] = after.code; paintCaps(); }
+  const cur = layerCur(remapLayer);
+  if (cur && cur[r]) { cur[r][c] = after.code; paintCaps(); }
   renderRemap();
 }
 
@@ -2253,14 +2261,15 @@ document.getElementById('remapDefaults').onclick = async (e) => {
   }
   btn.dataset.armed = '0';
   btn.textContent = 'Restore ' + (remapLayer ? 'FN layer' : 'base layer');
-  if (!device || !defaultRows) return;
+  const defRows = layerDef(remapLayer);
+  if (!device || !defRows) return;
   saveState('Restoring...', true);
   let n = 0, bad = 0;
   for (const rc of KEY_LABEL.keys()) {
     const [r, c] = rc.split('-').map(Number);
     // Not `if (!want) continue` - on the FN layer most factory values ARE 0, and skipping
     // them would leave every Fn binding in place and call it a restore.
-    const want = defaultRows[r] ? defaultRows[r][c] : undefined;
+    const want = defRows[r] ? defRows[r][c] : undefined;
     if (want === undefined) continue;
     const after = await setKeyCode(r, c, want, remapLayer);
     if (after && after.code === want) n++; else bad++;
