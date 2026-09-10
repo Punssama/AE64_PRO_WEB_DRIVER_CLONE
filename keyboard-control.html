@@ -68,7 +68,9 @@
 
   .center { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; min-height: 0; }
   .panel { border: 2px solid var(--ink); padding: 12px; background: var(--surface); box-shadow: 4px 4px 0 rgba(18,53,43,.35); }
-  .kbpanel { min-width: 0; overflow-x: auto; }
+  /* The strip carries its own dark bezel, so the panel does not need a full pad under
+     it - and in a viewport-locked column those pixels belong to the settings view. */
+  .kbpanel { min-width: 0; overflow-x: auto; padding-bottom: 4px; }
   .viewpanel { min-height: 0; display: flex; flex-direction: column; }
   .view { flex: 1; min-height: 0; overflow: auto; }
   /* Column so Apply stays pinned at the bottom - it must not jump when the taller
@@ -90,15 +92,30 @@
 
   /* Same height as the keyboard block it replaces, so connecting does not shove the
      rest of the layout around. */
+  /* The decorative strip is a real second light (38 LEDs under the PCB, counted off the
+     device), so it gets its own bar under the board rather than a corner of the panel. */
+  /* The centre column is viewport-locked, so every pixel here comes straight out of the
+     settings panel below. Hence one compact row with the caption inline rather than a
+     labelled block - a separate label line cost 24px the settings view could not spare. */
+  #ledStrip { margin: 5px auto 0; padding: 3px 5px; background: var(--ink); border: 2px solid var(--ink);
+              box-shadow: 4px 4px 0 rgba(18,53,43,.45); display: flex; align-items: center; gap: 2px; }
+  #ledStrip::before { content: 'UNDERGLOW'; flex: none; font-size: 12px; color: var(--muted); margin-right: 7px; letter-spacing: .5px; }
+  #ledStrip i { flex: 1; height: 8px; background: #0C1F19; }
   #kbEmpty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 256px; color: var(--muted); }
   #kbEmpty p { margin: 0; }
   #kbEmpty .kbicon { font-size: 64px; line-height: 1; color: var(--ink); opacity: .45; }
-  #kbTools { display: flex; justify-content: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  #kbTools { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
   /* The keycaps used to be the same cream as the panel behind them, so the whole board
      melted into the background. Caps are now lighter than the panel and the bezel is
      lifted off it with a hard shadow, which makes it read as a device sitting there. */
   #kb { position: relative; margin: 0 auto; max-width: 100%; background: var(--ink); border: 3px solid var(--ink); padding: 9px; overflow-x: auto; box-shadow: 5px 5px 0 rgba(18,53,43,.45); }
   #kb .kb-key { position: absolute; background: #FFF8EC; color: var(--ink); border: 1px solid var(--ink); box-shadow: 0 2px 0 rgba(18,53,43,.55); border-radius: 0; font-family: var(--term); font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 0; overflow: hidden; }
+  /* The LED layer sits under .cap for the same reason .lvl does - it is added first and
+     absolutely positioned, so the legend and the RT tag stay readable on top of it. */
+  #kb .kb-key .led { position: absolute; inset: 0; pointer-events: none; }
+  /* An effect can put any colour under the legend, including near-black, so while the
+     preview runs the legend goes white with a shadow - readable on all of them. */
+  #kb.lit .kb-key .cap { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85); }
   #kb .kb-key:hover { background: var(--accent); }
   #kb .kb-key.selected { background: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
@@ -186,7 +203,7 @@
   /* Lighting: direction (2) and the palette (8 slots) are small fixed sets, so they are
      buttons. Brightness and speed turned out to be 0-100, and the 23 effects are a
      dropdown - both too many to spell out as buttons in this panel. */
-  .lightrow { display: flex; align-items: center; gap: 14px; margin-bottom: 11px; }
+  .lightrow { display: flex; align-items: center; gap: 14px; margin-bottom: 5px; }
   .lightrow .toggle { margin-bottom: 0; width: 200px; flex: none; }
   .lightrow .hint { margin: 0; }
   .lightrow select { padding: 4px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
@@ -252,6 +269,7 @@
       <button id="getPerf" data-needs-key>Read selected keys</button>
     </div>
     <div id="kb"></div>
+    <div id="ledStrip" hidden></div>
   </section>
 
   <section class="panel viewpanel">
@@ -401,6 +419,9 @@ const CALIB = { Open: 0, Close: 1 };
 const LIGHT_OP = { Read: 1, Write: 2 };
 const LIGHT_CFG = { Base: 0, Palette: 1, ColorCorrection: 2 };
 const LIGHT_OPEN = { Close: 0, Open: 1 };
+// Va.ReadBack - hands back the frame the firmware is drawing right now, 15 LEDs per
+// packet, four bytes each in B,G,R,flag order.
+const LIGHT_SUB_READBACK = 3;
 // The official UI labels the firmware's effects L1..L23 and its own list is a plain
 // id 0..22 - no names, no gaps - so the mode byte is just the index. That list is shared
 // across every model though: THIS keyboard only uses the first 20 on the main LEDs and
@@ -458,6 +479,7 @@ const selected = new Set();
 // This is what puts the RT tag on a key; it is only ever set from a real device read.
 const keyMode = new Map();
 const keyEl = new Map();
+const ledIndex = new Map(); // rc -> slot in the firmware's flattened 6x21 LED grid
 
 function setKeyMode(rc, mode) {
   keyMode.set(rc, mode);
@@ -484,13 +506,15 @@ function renderKeyboard() {
     const btn = document.createElement('div');
     btn.className = 'kb-key';
     btn.append(
-      // .lvl is first and absolutely positioned; .cap and .tag are positioned too and
-      // come later, so they paint over the travel fill without needing z-index.
+      // .led and .lvl are first and absolutely positioned; .cap and .tag are positioned
+      // too and come later, so they paint over both without needing z-index.
+      Object.assign(document.createElement('span'), { className: 'led' }),
       Object.assign(document.createElement('span'), { className: 'lvl' }),
       Object.assign(document.createElement('span'), { className: 'cap', textContent: label }),
       Object.assign(document.createElement('span'), { className: 'tag', textContent: 'RT' }),
     );
     keyEl.set(rc, btn);
+    ledIndex.set(rc, row * 21 + col);
     btn.style.left = ((x - KB_MINX) * KB_SCALE + 6) + 'px';
     btn.style.top = ((y - KB_MINY) * KB_SCALE + 6) + 'px';
     btn.style.width = (w * KB_SCALE - 2) + 'px';
@@ -668,6 +692,7 @@ for (const btn of document.querySelectorAll('.navbtn')) {
     // auto-save for the io chain and keeps the device busy for nothing.
     if (btn.dataset.view === 'log') fitLog();
     if (btn.dataset.view === 'light' && device) loadLighting();
+    ledPreview(btn.dataset.view === 'light' && !!device);
     setTravelTest(btn.dataset.view === 'traveltest');
     if (btn.dataset.view !== 'calibration') {
       const arm = document.getElementById('calStart');
@@ -828,6 +853,7 @@ navigator.hid.addEventListener('disconnect', ({ device: d }) => {
   st.classList.remove('live');
   configCount = 0; currentConfig = null; configNames.clear();
   lightState = null; palette = []; lightAreas = []; lightArea = AREA.Keyboard;
+  lightStates = {}; stripLeds = 0; ledPreview(false);
   renderConfigPicker();
   renderLighting();
   updateKbVisibility();
@@ -1345,6 +1371,8 @@ let lightState = null;      // { open, mode, luminance, speed, direction, colorI
 let lightOriginal = {};     // per area: first thing ever read, so the user's setup can be restored
 let palette = [];           // 8 x {r,g,b}
 let lightAreas = [];        // areas this keyboard actually has, discovered at connect
+let lightStates = {};       // every area's state - the lights all run at once
+let stripLeds = 0;          // decorative LED count, counted off the device
 let lightArea = AREA.Keyboard;
 const modeCount = a => (a === AREA.Keyboard ? LIGHT_MODE_COUNT.keyboard : LIGHT_MODE_COUNT.decorate);
 
@@ -1380,6 +1408,7 @@ async function setLighting(patch) {
   const after = decodeLight(res);
   const bad = Object.keys(want).filter(k => after[k] !== want[k]);
   lightState = after;
+  lightStates[lightArea] = after;
   renderLighting();
   if (bad.length) {
     log('Lighting REJECTED -> ' + bad.map(k => k + '=' + after[k] + ' (wanted ' + want[k] + ')').join(', '));
@@ -1457,10 +1486,19 @@ async function loadLighting() {
   if (!lightAreas.length) {
     // Ask the device which areas it has rather than assuming a model. Decorate2..5 exist
     // in the protocol but not on this board, and they answer 255 when asked.
-    for (let a = AREA.Keyboard; a <= 5; a++) if (await getLighting(a)) lightAreas.push(a);
+    for (let a = AREA.Keyboard; a <= 5; a++) {
+      const st = await getLighting(a);
+      // Both lights run at the same time, so the preview needs every area's settings,
+      // not just the selected one's.
+      if (st) { lightAreas.push(a); lightStates[a] = st; }
+    }
+    // The mirror needs to know how many packets a frame takes before it can read one.
+    await countSlots(AREA.Keyboard);
+    if (lightAreas.includes(AREA.Decorate1)) await buildStrip();
     log('Lighting areas: ' + (lightAreas.map(areaName).join(', ') || 'none'));
   }
   lightState = await getLighting();
+  lightStates[lightArea] = lightState;
   palette = await getPalette();
   if (lightState && !lightOriginal[lightArea]) {
     lightOriginal[lightArea] = Object.assign({}, lightState);
@@ -1468,6 +1506,9 @@ async function loadLighting() {
     log(areaName(lightArea) + ' was: ' + JSON.stringify(lightState));
   }
   renderLighting();
+  // The LED count is only known once the strip has been counted off the device, which
+  // finishes after the view already opened - so re-run the preview to show it.
+  ledPreview(ledRunning);
 }
 
 document.getElementById('lightToggle').onclick = () => setLighting({ open: lightState.open ? 0 : 1 });
@@ -1485,6 +1526,109 @@ for (const [id, key] of [['lightLum', 'luminance'], ['lightSpeed', 'speed']]) {
   };
   slider.addEventListener('input', () => { box.value = slider.value; push(+slider.value); });
   box.addEventListener('input', () => { slider.value = box.value; push(+box.value); });
+}
+
+// ---- Live LED mirror ---------------------------------------------------------------
+// Va.ReadBack hands back the frame the firmware is CURRENTLY drawing, so the virtual
+// keyboard shows the real effect rather than a guess at it. Verified: on an animated
+// mode five reads a third of a second apart came back five different frames, and on a
+// static mode they came back identical - which is why an earlier check on a static mode
+// wrongly said this was a stored layer. Because the firmware draws it, brightness,
+// speed, direction and colour are all right for free, and so are effects nobody here
+// has ever seen.
+// Layout: 15 LEDs per packet, four bytes each in B,G,R,flag order (verified by setting
+// the palette to red and reading 0,0,255 back). Slots are the flattened 6x21 grid,
+// index row*21 + col - all 64 keys land on a real slot under that rule.
+const ledPackets = {};   // area -> how many packets its frame takes
+
+// Walk packets until the index byte answers 255. The lit-slot tail gives the exact LED
+// count; a dark frame has no lit slot, so whole packets are the fallback and only the
+// strip's granularity depends on it.
+async function countSlots(area) {
+  let packets = 0, tail = 0;
+  for (let i = 0; i < 12; i++) {
+    const r = await sendAndWait([CATEGORY.Lighting, LIGHT_SUB_READBACK, area, i], 700);
+    if (!r || r[3] === AREA_ABSENT) break;
+    packets++;
+    for (let k = 0; k < 15; k++) {
+      const o = 4 + k * 4;
+      if (r[o] || r[o + 1] || r[o + 2]) tail = i * 15 + k + 1;
+    }
+  }
+  ledPackets[area] = packets;
+  return tail || packets * 15;
+}
+
+async function buildStrip() {
+  stripLeds = await countSlots(AREA.Decorate1);
+  const strip = document.getElementById('ledStrip');
+  strip.innerHTML = '';
+  for (let i = 0; i < stripLeds; i++) strip.appendChild(document.createElement('i'));
+  log('Decorative strip: ' + stripLeds + ' LEDs.');
+}
+
+async function readFrame(area) {
+  const out = [];
+  for (let i = 0; i < (ledPackets[area] || 0); i++) {
+    const r = await sendAndWait([CATEGORY.Lighting, LIGHT_SUB_READBACK, area, i], 700);
+    if (!r) return null;
+    for (let k = 0; k < 15; k++) {
+      const o = 4 + k * 4;
+      out.push('rgb(' + r[o + 2] + ',' + r[o + 1] + ',' + r[o] + ')');
+    }
+  }
+  return out;
+}
+
+// Self-paced, like the travel-test poll: each pass waits for the last one, so a slow
+// machine stretches the interval instead of piling requests onto the io chain.
+let ledRunning = false;
+async function ledLoop() {
+  while (ledRunning && device) {
+    try {
+      const kbFrame = await readFrame(AREA.Keyboard);
+      if (!ledRunning) break;
+      if (kbFrame) for (const [rc, el] of keyEl) el.firstChild.style.background = kbFrame[ledIndex.get(rc)] || '';
+      if (stripLeds) {
+        const dcFrame = await readFrame(AREA.Decorate1);
+        if (!ledRunning) break;
+        const strip = document.getElementById('ledStrip');
+        if (dcFrame) {
+          // The count at connect can only be a whole number of packets when the strip
+          // happens to be dark - some effects render L1 as black. So the last lit slot
+          // trims the spare cells the first time a frame actually lights up, and never
+          // shrinks after that.
+          let lit = 0;
+          dcFrame.forEach((c, k) => { if (c !== 'rgb(0,0,0)') lit = k + 1; });
+          if (lit && lit < stripLeds) { stripLeds = lit; log('Decorative strip: ' + lit + ' LEDs.'); }
+          for (let k = 0; k < strip.children.length; k++) {
+            strip.children[k].hidden = k >= stripLeds;
+            strip.children[k].style.background = dcFrame[k];
+          }
+        }
+      }
+    } catch (err) {
+      log('LED mirror stopped: ' + err.message);
+      ledRunning = false;
+      break;
+    }
+    await new Promise(r => setTimeout(r, 30));
+  }
+  ledClear();
+}
+
+function ledClear() {
+  for (const el of keyEl.values()) el.firstChild.style.background = '';
+  document.getElementById('kb').classList.remove('lit');
+}
+
+function ledPreview(on) {
+  const strip = document.getElementById('ledStrip');
+  strip.hidden = !(on && stripLeds);
+  document.getElementById('kb').classList.toggle('lit', !!on);
+  if (on === ledRunning) return;
+  ledRunning = on;
+  if (on) ledLoop();
 }
 
 renderKeyboard();
