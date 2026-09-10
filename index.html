@@ -99,7 +99,7 @@
   /* The centre column is viewport-locked, so every pixel here comes straight out of the
      settings panel below. Hence one compact row with the caption inline rather than a
      labelled block - a separate label line cost 24px the settings view could not spare. */
-  #ledStrip { margin: 5px auto 0; padding: 3px 5px; background: var(--ink); border: 2px solid var(--ink);
+  #ledStrip { margin: 3px auto 0; padding: 3px 5px; background: var(--ink); border: 2px solid var(--ink);
               box-shadow: 4px 4px 0 rgba(18,53,43,.45); display: flex; align-items: center; gap: 2px; }
   #ledStrip::before { content: 'UNDERGLOW'; flex: none; font-size: 12px; color: var(--muted); margin-right: 7px; letter-spacing: .5px; }
   #ledStrip i { flex: 1; height: 8px; background: #0C1F19; }
@@ -112,7 +112,7 @@
                 color: var(--muted); text-decoration: underline; }
   #connectAny:hover { background: none; color: var(--ink); }
   #connectAny:active { transform: none; }
-  #kbTools { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  #kbTools { display: flex; justify-content: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
   /* The keycaps used to be the same cream as the panel behind them, so the whole board
      melted into the background. Caps are now lighter than the panel and the bezel is
      lifted off it with a hard shadow, which makes it read as a device sitting there. */
@@ -180,7 +180,11 @@
 
   /* Two tabs inside the Performance view: Rapid trigger and Dead zone. Same inverse-video
      active state as the sidebar, so "where am I" reads the same way everywhere. */
-  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; align-items: center; }
+  .tabs .hint { margin: 0; }
+  /* 86 assignable keys will not fit the panel, and a dropdown is not wanted here - so
+     the grid scrolls inside its own box rather than pushing the page around. */
+  .scroller { max-height: 96px; overflow-y: auto; align-content: flex-start; }
   .tab { min-width: 150px; padding: 5px 12px; font-size: 17px; text-align: center; box-shadow: none; }
   .tab.active, .tab.active:hover { background: var(--ink); color: var(--accent); }
 
@@ -359,29 +363,23 @@
     <div class="view" id="view-rate" hidden>
         <p class="hint">How often the keyboard reports to the PC. Changing this briefly disconnects and reconnects the keyboard.</p>
         <div class="field">
-          <label for="rate">Rate</label>
-          <select id="rate">
-            <option value="0">8000 Hz</option>
-            <option value="1">4000 Hz</option>
-            <option value="2">2000 Hz</option>
-            <option value="3">1000 Hz</option>
-            <option value="4">500 Hz</option>
-            <option value="5">250 Hz</option>
-            <option value="6">125 Hz</option>
-          </select>
+          <label>Rate</label>
+          <div class="pick" id="rate"></div>
         </div>
         <button id="getRate">Read current</button>
         <button id="setRate">Apply rate</button>
     </div>
 
     <div class="view" id="view-remap" hidden>
-      <div class="lightrow">
+      <div class="tabs">
+        <button class="tab active" data-tab="rk">Keys</button>
+        <button class="tab" data-tab="rf">Functions</button>
         <span class="hint" id="remapWho">Pick one key on the keyboard above.</span>
-        <select id="remapTo" disabled></select>
+        <span class="spacer"></span>
         <button id="remapDefaults" class="danger" data-armed="0">Restore factory layout</button>
       </div>
-      <p class="hint" id="remapNote">The factory layout is read back from the keyboard, so this is
-        always a way out - remap something you rarely use first.</p>
+      <div class="tabpane" id="tab-rk"><div class="pick scroller" id="remapKeys"></div></div>
+      <div class="tabpane" id="tab-rf" hidden><div class="pick scroller" id="remapFns"></div></div>
     </div>
 
     <div class="view" id="view-light" hidden>
@@ -390,9 +388,9 @@
           <span>Lighting</span><span class="tog">OFF</span>
         </button>
         <div class="pick" id="lightAreas"></div>
-        <select id="lightModes" disabled></select>
         <span class="hint" id="lightNote">Each area has its own effect and switch.</span>
       </div>
+      <div class="pick" id="lightModes"></div>
       <div class="fields">
         <div class="field"><label for="lightLum">Brightness %</label>
           <div class="ctl"><input type="range" id="lightLum_r" min="0" max="100" step="1"><input id="lightLum" type="number" min="0" max="100" step="1"></div></div>
@@ -625,11 +623,14 @@ document.getElementById('rtToggle').onclick = () => {
   scheduleApply(0);
 };
 
-for (const t of document.querySelectorAll('.tab')) {
-  t.onclick = () => {
-    for (const b of document.querySelectorAll('.tab')) b.classList.toggle('active', b === t);
-    for (const p of document.querySelectorAll('.tabpane')) p.hidden = p.id !== 'tab-' + t.dataset.tab;
-  };
+for (const group of document.querySelectorAll('.tabs')) {
+  const view = group.closest('.view');
+  for (const t of group.querySelectorAll('.tab')) {
+    t.onclick = () => {
+      for (const b of group.querySelectorAll('.tab')) b.classList.toggle('active', b === t);
+      for (const p of view.querySelectorAll('.tabpane')) p.hidden = p.id !== 'tab-' + t.dataset.tab;
+    };
+  }
 }
 
 function updateSelectionUI() {
@@ -1038,13 +1039,25 @@ async function switchConfig(id) {
   saveState(`Switched to ${configLabel(currentConfig)}`);
 }
 
+// Buttons rather than a dropdown, like every other fixed set of options here. The value
+// is only staged: applying it makes the keyboard re-enumerate over USB, which is not
+// something a stray click should do.
+const RATES = ['8000 Hz', '4000 Hz', '2000 Hz', '1000 Hz', '500 Hz', '250 Hz', '125 Hz'];
+let rateSel = 3;
+function renderRates() {
+  pickRow(document.getElementById('rate'), RATES.length, rateSel, i => RATES[i], i => {
+    rateSel = i;
+    renderRates();
+  });
+}
+
 document.getElementById('getRate').onclick = async () => {
   const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Read]);
-  if (res) log('Polling rate value = ' + res[3]);
+  if (res) { rateSel = res[3]; renderRates(); log('Polling rate value = ' + res[3]); }
 };
 
 document.getElementById('setRate').onclick = async () => {
-  const rate = parseInt(document.getElementById('rate').value, 10);
+  const rate = rateSel;
   const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Write, rate]);
   if (res) log('Set polling rate result, echoed value = ' + res[3]);
 };
@@ -1584,26 +1597,16 @@ async function setLighting(patch) {
 
 // Every lighting setting is a small set of fixed steps, so each renders as a row of
 // buttons rather than a slider - you can see all the options and which one is live.
-function pickRow(el, count, current, label, onPick) {
+function pickRow(el, count, current, label, onPick, disabled = false) {
   el.innerHTML = '';
   for (let i = 0; i < count; i++) {
     const b = document.createElement('button');
     if (i === current) b.className = 'on';
     b.textContent = label(i);
-    b.disabled = !lightState && el.id !== 'lightAreas';
+    b.disabled = disabled;
     b.onclick = () => onPick(i);
     el.appendChild(b);
   }
-}
-
-// 20 effects will not fit a row of buttons in a 142px panel, so this one control is a
-// dropdown. Its length depends on the area, so it is rebuilt when the area changes.
-const lightModeSel = document.getElementById('lightModes');
-lightModeSel.onchange = () => setLighting({ mode: +lightModeSel.value });
-function fillModes(n) {
-  if (lightModeSel.options.length === n) return;
-  lightModeSel.innerHTML = '';
-  for (let i = 0; i < n; i++) lightModeSel.add(new Option('L' + (i + 1), i));
 }
 
 function renderLighting() {
@@ -1618,17 +1621,18 @@ function renderLighting() {
           lightAreas.indexOf(lightArea), i => areaName(lightAreas[i]),
           i => { lightArea = lightAreas[i]; loadLighting(); });
 
-  fillModes(modeCount(lightArea));
-  lightModeSel.disabled = !st;
-  // A mode outside this area's range would leave a stale name showing, so blank it.
-  lightModeSel.value = st && st.mode < modeCount(lightArea) ? st.mode : '';
+  // One button per effect. They get their own row: 20 of them alongside the toggle and
+  // the area buttons wrapped into a second line anyway, so the row is free.
+  pickRow(document.getElementById('lightModes'), modeCount(lightArea),
+          st ? st.mode : -1, i => 'L' + (i + 1),
+          i => setLighting({ mode: i }), !st);
   for (const [id, key] of [['lightLum', 'luminance'], ['lightSpeed', 'speed']]) {
     const box = document.getElementById(id), slider = document.getElementById(id + '_r');
     box.disabled = slider.disabled = !st;
     if (st) { box.value = st[key]; slider.value = st[key]; }
   }
   pickRow(document.getElementById('lightDir'), 2, st ? st.direction : -1,
-          i => (i ? 'Back' : 'Fwd'), i => setLighting({ direction: i }));
+          i => (i ? 'Back' : 'Fwd'), i => setLighting({ direction: i }), !st);
 
   const pal = document.getElementById('lightPalette');
   pal.innerHTML = '';
@@ -1844,6 +1848,11 @@ let defaultRows = null;   // the factory layout, kept because it is the way back
 
 // Straight out of the vendor's own code table. NOT verified on this board - the restore
 // button is what makes trying them safe.
+// Every standard key, not just the ones this board happens to have - Page Up is a
+// perfectly good thing to put on a 64-key board that has no Page Up of its own.
+const REMAP_KEYS = [];
+for (let code = 4; code <= 231; code++) if (hidName(code)) REMAP_KEYS.push(code);
+
 const SPECIAL_CODES = [
   [8425, 'Volume up'], [8426, 'Volume down'], [8418, 'Mute'],
   [8373, 'Next track'], [8374, 'Previous track'], [8397, 'Play / pause'],
@@ -1871,19 +1880,7 @@ async function loadKeymap() {
   }
   for (const [code, label] of SPECIAL_CODES) codeLabel.set(code, label);
 
-  const sel = document.getElementById('remapTo');
-  sel.innerHTML = '';
-  // Every standard key, not just the ones this board happens to have - Page Up is a
-  // perfectly good thing to remap onto a 64-key board that has no Page Up of its own.
-  const keys = document.createElement('optgroup'); keys.label = 'Keys';
-  for (let code = 4; code <= 231; code++) {
-    const name = hidName(code);
-    if (name) keys.appendChild(new Option(name, code));
-  }
-  const fns = document.createElement('optgroup'); fns.label = 'Functions (not verified)';
-  for (const [code, label] of SPECIAL_CODES) fns.appendChild(new Option(label, code));
-  sel.append(keys, fns);
-  log('Remap: factory layout read, ' + keys.children.length + ' keys offered.');
+  log('Remap: factory layout read, ' + REMAP_KEYS.length + ' keys offered.');
   return true;
 }
 
@@ -1895,28 +1892,31 @@ function remapTarget() {
 
 async function renderRemap() {
   const who = document.getElementById('remapWho');
-  const sel = document.getElementById('remapTo');
   const rc = remapTarget();
-  sel.disabled = !rc || !device;
-  if (!device) { who.textContent = 'Connect the keyboard first.'; return; }
-  if (!rc) {
-    who.textContent = selected.size ? 'Pick exactly one key - remapping is per key.'
-                                    : 'Pick one key on the keyboard above.';
-    return;
+  let code = -1;
+  if (!device) who.textContent = 'Connect the keyboard first.';
+  else if (!rc) who.textContent = selected.size ? 'Pick exactly one key - remapping is per key.'
+                                                : 'Pick one key on the keyboard above.';
+  else {
+    const [r, c] = rc.split('-').map(Number);
+    const row = await getKeyRow(r);
+    code = row ? row[c] : -1;
+    who.textContent = KEY_LABEL.get(rc) + ' sends: ' + keyName(code);
   }
-  const [r, c] = rc.split('-').map(Number);
-  const row = await getKeyRow(r);
-  const code = row ? row[c] : 0;
-  const now = keyName(code);
-  who.textContent = KEY_LABEL.get(rc) + ' currently sends: ' + now;
-  sel.value = code;
+  const off = !rc || !device;
+  pickRow(document.getElementById('remapKeys'), REMAP_KEYS.length,
+          REMAP_KEYS.indexOf(code), i => hidName(REMAP_KEYS[i]),
+          i => assignKey(REMAP_KEYS[i]), off);
+  pickRow(document.getElementById('remapFns'), SPECIAL_CODES.length,
+          SPECIAL_CODES.findIndex(x => x[0] === code), i => SPECIAL_CODES[i][1],
+          i => assignKey(SPECIAL_CODES[i][0]), off);
 }
 
-document.getElementById('remapTo').onchange = async () => {
+
+async function assignKey(code) {
   const rc = remapTarget();
   if (!rc) return;
   const [r, c] = rc.split('-').map(Number);
-  const code = +document.getElementById('remapTo').value;
   saveState('Saving...', true);
   const after = await setKeyCode(r, c, code);
   if (!after) { log('Remap: no answer to the write.'); saveState('Remap failed', true); return; }
@@ -1928,7 +1928,7 @@ document.getElementById('remapTo').onchange = async () => {
     saveState('Remapped');
   }
   renderRemap();
-};
+}
 
 // Two clicks, like calibration: this rewrites every key, so it should not be one stray tap.
 document.getElementById('remapDefaults').onclick = async (e) => {
@@ -1994,6 +1994,8 @@ updateKbVisibility();
 syncSliders();
 setRtMode(0);
 renderLighting();
+renderRates();
+renderRemap();
 </script>
 </body>
 </html>
