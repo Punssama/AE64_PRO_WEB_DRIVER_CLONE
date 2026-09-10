@@ -256,6 +256,8 @@
     <button class="navbtn" data-view="traveltest">Travel test</button>
     <button class="navbtn" data-view="calibration">Calibration</button>
     <div class="navsep"></div>
+    <button class="navbtn" data-view="remap">Remap keys</button>
+    <div class="navsep"></div>
     <button class="navbtn" data-view="log">Log</button>
     <button class="navbtn" data-view="rate">Polling rate</button>
     <button class="navbtn" data-view="light">Lighting</button>
@@ -372,6 +374,16 @@
         <button id="setRate">Apply rate</button>
     </div>
 
+    <div class="view" id="view-remap" hidden>
+      <div class="lightrow">
+        <span class="hint" id="remapWho">Pick one key on the keyboard above.</span>
+        <select id="remapTo" disabled></select>
+        <button id="remapDefaults" class="danger" data-armed="0">Restore factory layout</button>
+      </div>
+      <p class="hint" id="remapNote">The factory layout is read back from the keyboard, so this is
+        always a way out - remap something you rarely use first.</p>
+    </div>
+
     <div class="view" id="view-light" hidden>
       <div class="lightrow">
         <button id="lightToggle" class="toggle" aria-pressed="false">
@@ -409,7 +421,14 @@
 
 <script>
 // Protocol reverse-engineered from https://www.xsyd.top/ (own device, WebHID).
-const CATEGORY = { Global: 2, Performance: 4, Lighting: 5 };
+const CATEGORY = { Device: 1, Global: 2, Key: 3, Performance: 4, Lighting: 5, Macro: 7 };
+const DEV_SUB = { Protocol: 1, Info: 2, Feature: 3 };
+// Key remapping. A row answers with 21 u16LE keycodes - the same 21-column grid the LED
+// mirror walks - so reading the whole board is 6 packets, not 64.
+const KEY_SUB = { GetRow: 1, SetRow: 2, GetCode: 3, SetCode: 4, Style: 5, Default: 6 };
+const MACRO_SUB = { GetMode: 1, SetMode: 2, GetData: 3, SetData: 4 };
+// The firmware itself caps a macro step's delay here - the vendor bundle throws above it.
+const MACRO_DELAY_MAX = 32767;
 const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5, CalibrationSetting: 6 };
 // ConfigSwitch's third byte is NOT the QR enum the other commands use: 0/1/2 line up
 // with ReadList/Read/Write, but 3 and 4 are name get/set, which QR has no values for.
@@ -474,8 +493,8 @@ const KEY_LAYOUT = [
   ['3-13','Enter',548,73,49,22],
   ['4-0','L-Shift',257,96,44,22],['4-2','Z',302,96,22,22],['4-3','X',325,96,22,22],['4-4','C',348,96,22,22],
   ['4-5','V',371,96,22,22],['4-6','B',394,96,22,22],['4-7','N',417,96,22,22],['4-8','M',440,96,22,22],
-  ['4-9',', <',462,96,22,22],['4-10','. >',485,96,22,22],['4-11','/ ?',508,96,22,22],['4-12','PgUp',531,96,22,22],
-  ['4-13','↑',554,96,22,22],['4-14','PgDn',577,96,22,22],
+  ['4-9',', <',462,96,22,22],['4-10','. >',485,96,22,22],['4-11','/ ?',508,96,22,22],['4-12','R-Shift',531,96,22,22],
+  ['4-13','↑',554,96,22,22],['4-14','Del',577,96,22,22],
   ['5-0','L-Ctrl',257,119,27,22],['5-1','L-Gui',285,119,27,22],['5-2','L-Alt',313,119,27,22],
   ['5-6','Space',345,119,136,22],['5-9','R-Alt',484,119,22,22],['5-10','Fn1',507,119,22,22],
   ['5-12','←',531,119,22,22],['5-13','↓',554,119,22,22],['5-14','→',577,119,22,22],
@@ -626,6 +645,8 @@ function updateSelectionUI() {
     // button to think twice at any more, so one nudge rewrites every selected key.
     `${n} keys picked - any change writes to all ${n} instantly.`;
   updateEnabled();
+  // Remapping follows the same key picker, so it has to redraw when the picking changes.
+  if (!document.getElementById('view-remap').hidden) renderRemap();
 }
 
 // The gauge draws the key's real travel, read from the device (axisRangeMax).
@@ -702,6 +723,12 @@ for (const btn of document.querySelectorAll('.navbtn')) {
     // auto-save for the io chain and keeps the device busy for nothing.
     if (btn.dataset.view === 'log') fitLog();
     if (btn.dataset.view === 'light' && device) loadLighting();
+    if (btn.dataset.view === 'remap' && device) loadKeymap().then(renderRemap);
+    if (btn.dataset.view !== 'remap') {
+      const arm = document.getElementById('remapDefaults');
+      arm.dataset.armed = '0';
+      arm.textContent = 'Restore factory layout';
+    }
     ledPreview(btn.dataset.view === 'light' && !!device);
     setTravelTest(btn.dataset.view === 'traveltest');
     if (btn.dataset.view !== 'calibration') {
@@ -926,6 +953,7 @@ function resetDevice(msg) {
   configCount = 0; currentConfig = null; configNames.clear();
   lightState = null; palette = []; lightAreas = []; lightArea = AREA.Keyboard;
   lightStates = {}; stripLeds = 0; ledPreview(false);
+  defaultRows = null; codeLabel.clear();
   renderConfigPicker();
   renderLighting();
   updateKbVisibility();
@@ -1084,6 +1112,56 @@ function readCfg() {
 
 // ---- Axis data: live travel and calibration state -------------------------------
 // One packet answers for a whole row, so polling the board is ~5 reads, not 64.
+// One 2-byte read that says what this board actually has, instead of guessing from a
+// static menu list. Bit layout taken from the vendor's own decoder.
+async function getDeviceFeature() {
+  const res = await sendAndWait([CATEGORY.Device, DEV_SUB.Feature], 700);
+  if (!res) return null;
+  const bit = (b, m) => !!(res[b] & m);
+  return {
+    axis: { mechanical: bit(2, 1), magnetic: bit(2, 2), optical: bit(2, 4), inductive: bit(2, 8), magnetic3D: bit(2, 16) },
+    link: { usb: bit(3, 1), rf24: bit(3, 2), ble: bit(3, 4), usb3: bit(3, 8) },
+    rgb: bit(4, 1), knob: bit(4, 2),
+    ext: { smallScreen: bit(5, 1), fullScreen: bit(5, 2), haptic: bit(5, 4),
+           voicePlay: bit(5, 8), voiceRec: bit(5, 16), gamepad: bit(5, 32), dotMatrix: bit(5, 64) },
+  };
+}
+
+function rowCodes(res) {
+  const out = [];
+  for (let i = 0; i < 21; i++) out.push(res[4 + i * 2] | res[5 + i * 2] << 8);
+  return out;
+}
+
+async function getKeyRow(row, layer = 0, timeout = 600) {
+  const res = await sendAndWait([CATEGORY.Key, KEY_SUB.GetRow, layer, row], timeout);
+  return res ? rowCodes(res) : null;
+}
+
+// The factory layout, which is the whole reason remapping is safe to try: it is the way
+// back. `system` picks the Win/Mac set, `layer` the Fn level.
+async function getDefaultKeyRow(row, layer = 0, system = 0, timeout = 600) {
+  const res = await sendAndWait([CATEGORY.Key, KEY_SUB.Default, system << 4 | layer, row], timeout);
+  return res ? rowCodes(res) : null;
+}
+
+async function setKeyCode(row, col, code, layer = 0) {
+  const res = await sendAndWait([CATEGORY.Key, KEY_SUB.SetCode, layer, row, col, ...u16le16bit(code)], 700);
+  // The write echoes layer/row/col/keycode, so believe the device, not the request.
+  return res ? { layer: res[2], row: res[3], col: res[4], code: res[5] | res[6] << 8 } : null;
+}
+
+// A macro step packs into 32 bits: press/release in the top bit, then delay, then the
+// keycode. Bit 31 makes the value negative as a signed int, hence the >>> 0.
+function packAction(a) {
+  const v = (((a.down ? 1 : 0) << 31) | (Math.min(a.delay, MACRO_DELAY_MAX) << 16) | (a.code & 0xffff)) >>> 0;
+  return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+}
+function unpackAction(b, i = 0) {
+  const v = (b[i] | b[i + 1] << 8 | b[i + 2] << 16 | b[i + 3] << 24) >>> 0;
+  return { down: v >>> 31 === 1, delay: (v >>> 16) & MACRO_DELAY_MAX, code: v & 0xffff };
+}
+
 async function getAxisRow(mode, row, timeout = 400) {
   const res = await sendAndWait([CATEGORY.Performance, PERF_SUB.AxisData, mode, row], timeout);
   if (!res) return null;
@@ -1733,6 +1811,150 @@ if (!navigator.hid) {
   document.getElementById('connectAny').hidden = true;
 }
 
+
+// ---- Remap ---------------------------------------------------------------------------
+// Keycode names are DERIVED, not hardcoded and not scraped. The HID keyboard page is
+// mostly arithmetic - A..Z, 1..0, F1..F12 are runs - so only the irregular ones need
+// naming, and those come from the vendor bundle's own event.code table.
+// An earlier version read the names off the factory layout instead, pairing each code
+// with whatever KEY_LABEL called that position. That inherited the layout's mistakes:
+// this board reports 229 (Right Shift) and 76 (Delete) where the scrape said PgUp and
+// PgDn, so the picker offered "PgUp" for Right Shift and had no real PageUp at all.
+const HID_ODD = {
+  40: 'Enter', 41: 'Esc', 42: 'Backspace', 43: 'Tab', 44: 'Space', 45: '-', 46: '=',
+  47: '[', 48: ']', 49: '\\', 51: ';', 52: "'", 53: '`', 54: ',', 55: '.', 56: '/',
+  57: 'Caps Lock', 71: 'Scroll Lock', 72: 'Pause', 73: 'Insert', 74: 'Home', 75: 'Page Up',
+  76: 'Delete', 77: 'End', 78: 'Page Down', 79: 'Right arrow', 80: 'Left arrow',
+  81: 'Down arrow', 82: 'Up arrow', 101: 'Menu', 224: 'Left Ctrl', 225: 'Left Shift',
+  226: 'Left Alt', 227: 'Left Win', 228: 'Right Ctrl', 229: 'Right Shift',
+  230: 'Right Alt', 231: 'Right Win',
+};
+function hidName(code) {
+  if (code >= 4 && code <= 29) return String.fromCharCode(65 + code - 4);
+  if (code >= 30 && code <= 38) return String(code - 29);
+  if (code === 39) return '0';
+  if (code >= 58 && code <= 69) return 'F' + (code - 57);
+  return HID_ODD[code];
+}
+// Whatever the standard table cannot name - this board's Fn1 is 61697 - falls back to
+// what the factory layout says sits at that position.
+const codeLabel = new Map();
+const keyName = code => hidName(code) || codeLabel.get(code) || ('code ' + code);
+let defaultRows = null;   // the factory layout, kept because it is the way back
+
+// Straight out of the vendor's own code table. NOT verified on this board - the restore
+// button is what makes trying them safe.
+const SPECIAL_CODES = [
+  [8425, 'Volume up'], [8426, 'Volume down'], [8418, 'Mute'],
+  [8373, 'Next track'], [8374, 'Previous track'], [8397, 'Play / pause'],
+  [62215, 'Lighting on/off'], [62208, 'Lighting mode'], [62210, 'Brightness up'],
+  [62211, 'Brightness down'], [62212, 'Speed up'], [62213, 'Speed down'],
+  [16640, 'Mouse left'], [16896, 'Mouse right'], [17152, 'Mouse middle'],
+  [61957, 'Profile 1'], [61958, 'Profile 2'], [61959, 'Profile 3'], [61960, 'Profile 4'],
+  [61953, 'Windows layout'], [61954, 'Mac layout'],
+];
+
+async function loadKeymap() {
+  if (defaultRows) return true;
+  const rows = [];
+  for (let r = 0; r < 6; r++) {
+    const def = await getDefaultKeyRow(r);
+    if (!def) { log('Remap: the keyboard did not answer the layout read.'); return false; }
+    rows.push(def);
+  }
+  defaultRows = rows;
+  // Fallback names only, for codes the standard table does not cover.
+  for (const [rc, label] of KEY_LABEL) {
+    const [r, c] = rc.split('-').map(Number);
+    const code = rows[r] && rows[r][c];
+    if (code && !hidName(code)) codeLabel.set(code, label);
+  }
+  for (const [code, label] of SPECIAL_CODES) codeLabel.set(code, label);
+
+  const sel = document.getElementById('remapTo');
+  sel.innerHTML = '';
+  // Every standard key, not just the ones this board happens to have - Page Up is a
+  // perfectly good thing to remap onto a 64-key board that has no Page Up of its own.
+  const keys = document.createElement('optgroup'); keys.label = 'Keys';
+  for (let code = 4; code <= 231; code++) {
+    const name = hidName(code);
+    if (name) keys.appendChild(new Option(name, code));
+  }
+  const fns = document.createElement('optgroup'); fns.label = 'Functions (not verified)';
+  for (const [code, label] of SPECIAL_CODES) fns.appendChild(new Option(label, code));
+  sel.append(keys, fns);
+  log('Remap: factory layout read, ' + keys.children.length + ' keys offered.');
+  return true;
+}
+
+// One key at a time on purpose. The performance tab writes the whole form to every
+// selected key, which is fine for a trigger depth and a disaster for a keymap.
+function remapTarget() {
+  return selected.size === 1 ? selected.values().next().value : null;
+}
+
+async function renderRemap() {
+  const who = document.getElementById('remapWho');
+  const sel = document.getElementById('remapTo');
+  const rc = remapTarget();
+  sel.disabled = !rc || !device;
+  if (!device) { who.textContent = 'Connect the keyboard first.'; return; }
+  if (!rc) {
+    who.textContent = selected.size ? 'Pick exactly one key - remapping is per key.'
+                                    : 'Pick one key on the keyboard above.';
+    return;
+  }
+  const [r, c] = rc.split('-').map(Number);
+  const row = await getKeyRow(r);
+  const code = row ? row[c] : 0;
+  const now = keyName(code);
+  who.textContent = KEY_LABEL.get(rc) + ' currently sends: ' + now;
+  sel.value = code;
+}
+
+document.getElementById('remapTo').onchange = async () => {
+  const rc = remapTarget();
+  if (!rc) return;
+  const [r, c] = rc.split('-').map(Number);
+  const code = +document.getElementById('remapTo').value;
+  saveState('Saving...', true);
+  const after = await setKeyCode(r, c, code);
+  if (!after) { log('Remap: no answer to the write.'); saveState('Remap failed', true); return; }
+  if (after.code !== code) {
+    log('Remap REJECTED -> key kept code ' + after.code + ' (wanted ' + code + ')');
+    saveState('Remap refused', true);
+  } else {
+    log('Remap: ' + KEY_LABEL.get(rc) + ' now sends ' + (keyName(code)));
+    saveState('Remapped');
+  }
+  renderRemap();
+};
+
+// Two clicks, like calibration: this rewrites every key, so it should not be one stray tap.
+document.getElementById('remapDefaults').onclick = async (e) => {
+  const btn = e.currentTarget;
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Click again to restore all keys';
+    return;
+  }
+  btn.dataset.armed = '0';
+  btn.textContent = 'Restore factory layout';
+  if (!device || !defaultRows) return;
+  saveState('Restoring...', true);
+  let n = 0, bad = 0;
+  for (const rc of KEY_LABEL.keys()) {
+    const [r, c] = rc.split('-').map(Number);
+    const want = defaultRows[r] && defaultRows[r][c];
+    if (!want) continue;
+    const after = await setKeyCode(r, c, want);
+    if (after && after.code === want) n++; else bad++;
+  }
+  log('Remap: restored ' + n + ' keys' + (bad ? ', ' + bad + ' FAILED' : ''));
+  saveState(bad ? 'Restore incomplete' : 'Factory layout restored', !!bad);
+  renderRemap();
+};
+
 // One net under the gate that decides what hardware this tool will talk to.
 if (location.search.includes('selftest')) {
   const fake = (vendorId, out) => ({ vendorId, collections: [{ outputReports: out ? [{}] : [] }] });
@@ -1751,6 +1973,19 @@ if (location.search.includes('selftest')) {
   console.assert(!echoes([5, 1, 0, 0], rep(5, 1, 0, 2, 19, 17, 20)), 'a reply for another config is refused');
   console.assert(!echoes([2, 3, 0], rep(2, 8, 0, 2, 0, 20)), 'an unsolicited report is refused');
   console.assert(!echoes([5, 3, 0, 2], rep(5, 3, 0, 4)), 'another packet index is refused');
+  // The macro step codec: bit-packing, so it gets a round trip including both edges.
+  const trip = a => JSON.stringify(unpackAction(packAction(a))) === JSON.stringify(a);
+  console.assert(trip({ down: true, delay: 0, code: 4 }), 'press, no delay, plain key');
+  console.assert(trip({ down: false, delay: MACRO_DELAY_MAX, code: 0xffff }), 'release at both maxima');
+  console.assert(trip({ down: true, delay: 1234, code: 0xf200 }), 'a special function code survives');
+  console.assert(unpackAction(packAction({ down: true, delay: 99999, code: 4 })).delay === MACRO_DELAY_MAX,
+                 'an over-long delay is clamped, not wrapped');
+  // Keycode naming is arithmetic over the HID page, so check both ends of each run.
+  console.assert(hidName(4) === 'A' && hidName(29) === 'Z', 'the letter run');
+  console.assert(hidName(30) === '1' && hidName(38) === '9' && hidName(39) === '0', 'the digit run');
+  console.assert(hidName(58) === 'F1' && hidName(69) === 'F12', 'the function-key run');
+  console.assert(hidName(229) === 'Right Shift' && hidName(76) === 'Delete', 'the two the layout got wrong');
+  console.assert(hidName(61697) === undefined, 'a special code is left to the fallback');
   console.log('selftest done');
 }
 
