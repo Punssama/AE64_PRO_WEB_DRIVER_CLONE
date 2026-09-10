@@ -136,6 +136,12 @@
   /* Live travel fill, driven by the Travel test poll. Rises from the bottom of the cap. */
   #kb .kb-key .lvl { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--desk); }
   #kb .kb-key .cap { position: relative; }
+  /* A key that no longer sends what is printed on it says so, so you can see at a glance
+     what you have changed and what to put back. */
+  #kb .kb-key.remapped { box-shadow: inset 0 -3px 0 var(--accent), 0 2px 0 rgba(18,53,43,.55); }
+  /* While a key is being dragged out of the picker, every cap is a target. */
+  #kb.dropping .kb-key { outline: 1px dashed rgba(18,53,43,.45); outline-offset: -3px; }
+  #kb .kb-key.droptarget { background: var(--accent); outline: 2px solid var(--ink); outline-offset: -2px; }
   /* Calibration progress: a key the firmware has finished learning. */
   #kb .kb-key.done { background: var(--desk); }
 
@@ -562,6 +568,23 @@ function renderKeyboard() {
     btn.dataset.row = row;
     btn.dataset.col = col;
     btn.onclick = () => toggleKey(row, col);
+    // Drop target for the remap picker. Only ever armed while a drag from the picker is
+    // in flight, so ordinary clicking is untouched.
+    btn.ondragover = e => {
+      if (dragCode === null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      btn.classList.add('droptarget');
+    };
+    btn.ondragleave = () => btn.classList.remove('droptarget');
+    btn.ondrop = e => {
+      e.preventDefault();
+      btn.classList.remove('droptarget');
+      const code = Number(e.dataTransfer.getData('text/plain'));
+      if (!Number.isFinite(code)) return;
+      setSelection([rc]);
+      assignTo(rc, code);
+    };
     kb.appendChild(btn);
   });
   updateSelectionUI();
@@ -737,7 +760,10 @@ for (const btn of document.querySelectorAll('.navbtn')) {
     // auto-save for the io chain and keeps the device busy for nothing.
     if (btn.dataset.view === 'log') fitLog();
     if (btn.dataset.view === 'light' && device) loadLighting();
-    if (btn.dataset.view === 'remap' && device) loadKeymap().then(renderRemap);
+    if (btn.dataset.view === 'remap') {
+      renderRemap();
+      if (device) loadKeymap().then(ok => ok && refreshKeymap()).then(renderRemap);
+    }
     if (btn.dataset.view !== 'remap') {
       const arm = document.getElementById('remapDefaults');
       arm.dataset.armed = '0';
@@ -971,7 +997,7 @@ function resetDevice(msg) {
   configCount = 0; currentConfig = null; configNames.clear();
   lightState = null; palette = []; lightAreas = []; lightArea = AREA.Keyboard;
   lightStates = {}; stripLeds = 0; ledPreview(false);
-  defaultRows = null; codeLabel.clear();
+  defaultRows = null; curRows = null; codeLabel.clear(); paintCaps();
   renderConfigPicker();
   renderLighting();
   updateKbVisibility();
@@ -1875,6 +1901,8 @@ function hidName(code) {
 const codeLabel = new Map();
 const keyName = code => hidName(code) || codeLabel.get(code) || ('code ' + code);
 let defaultRows = null;   // the factory layout, kept because it is the way back
+let curRows = null;      // what each key sends right now, cached so drawing never awaits
+let dragCode = null;     // the code being dragged out of the picker
 
 // Straight out of the vendor's own code table. NOT verified on this board - the restore
 // button is what makes trying them safe.
@@ -1978,6 +2006,7 @@ function kpRows(rows, current, onPick, off, u) {
       if (code === current) b.className = 'on';
       b.disabled = off;
       b.onclick = () => onPick(code);
+      makeDraggable(b, code);
       line.appendChild(b);
     }
     box.appendChild(line);
@@ -1998,30 +2027,60 @@ function remapTarget() {
   return selected.size === 1 ? selected.values().next().value : null;
 }
 
-async function renderRemap() {
+async function refreshKeymap() {
+  const rows = [];
+  for (let r = 0; r < 6; r++) {
+    const row = await getKeyRow(r);
+    if (!row) return false;
+    rows.push(row);
+  }
+  curRows = rows;
+  paintCaps();
+  return true;
+}
+
+// The legend on the virtual keyboard is what the key SENDS, not what is printed on the
+// physical cap. A remapped key still showing its old letter is the tool lying about the
+// board - and it is the only place you can see, at a glance, what you have changed.
+function paintCaps() {
+  for (const [rc, el] of keyEl) {
+    const [r, c] = rc.split('-').map(Number);
+    const code = curRows && curRows[r] ? curRows[r][c] : 0;
+    const def = defaultRows && defaultRows[r] ? defaultRows[r][c] : 0;
+    const moved = !!(code && def && code !== def);
+    // The picker's short legends, because "Page Down" wraps to two lines on a keycap.
+    // kpLabel gives Space an empty string on purpose, so fall back for that one.
+    el.children[2].textContent = moved ? (kpLabel(code) || keyName(code)) : KEY_LABEL.get(rc);
+    el.classList.toggle('remapped', moved);
+  }
+}
+
+// Synchronous on purpose: it draws from the cache, so it can run the instant the view is
+// shown and get the size right the first time.
+function renderRemap() {
   const who = document.getElementById('remapWho');
   const rc = remapTarget();
   let code = -1;
-  if (!device) who.textContent = 'Connect the keyboard first.';
+  if (!device) who.textContent = 'Connect the keyboard, then drag a key onto the board above.';
   else if (!rc) who.textContent = selected.size ? 'Pick exactly one key - remapping is per key.'
-                                                : 'Pick one key on the keyboard above.';
+                                                : 'Drag a key onto the board above, or pick one key first.';
   else {
     const [r, c] = rc.split('-').map(Number);
-    const row = await getKeyRow(r);
-    code = row ? row[c] : -1;
+    code = curRows && curRows[r] ? curRows[r][c] : -1;
     who.textContent = KEY_LABEL.get(rc) + ' sends: ' + keyName(code);
   }
-  const off = !rc || !device;
+  const off = !device;
   renderPicker(document.getElementById('remapKeys'), code, assignKey, off);
-  pickRow(document.getElementById('remapFns'), SPECIAL_CODES.length,
+  const fns = document.getElementById('remapFns');
+  pickRow(fns, SPECIAL_CODES.length,
           SPECIAL_CODES.findIndex(x => x[0] === code), i => SPECIAL_CODES[i][1],
           i => assignKey(SPECIAL_CODES[i][0]), off);
+  [...fns.children].forEach((b, i) => makeDraggable(b, SPECIAL_CODES[i][0]));
 }
 
 
-async function assignKey(code) {
-  const rc = remapTarget();
-  if (!rc) return;
+async function assignTo(rc, code) {
+  if (!rc || !device) return;
   const [r, c] = rc.split('-').map(Number);
   saveState('Saving...', true);
   const after = await setKeyCode(r, c, code);
@@ -2030,10 +2089,31 @@ async function assignKey(code) {
     log('Remap REJECTED -> key kept code ' + after.code + ' (wanted ' + code + ')');
     saveState('Remap refused', true);
   } else {
-    log('Remap: ' + KEY_LABEL.get(rc) + ' now sends ' + (keyName(code)));
+    log('Remap: ' + KEY_LABEL.get(rc) + ' now sends ' + keyName(code));
     saveState('Remapped');
   }
+  // Believe the echo, not the request, and repaint from it.
+  if (curRows && curRows[r]) { curRows[r][c] = after.code; paintCaps(); }
   renderRemap();
+}
+
+const assignKey = code => assignTo(remapTarget(), code);
+
+// Dragging is the natural gesture here - you are moving a key onto a key - and it drops
+// on whatever you aim at, so it does not need anything selected first.
+function makeDraggable(btn, code) {
+  if (btn.disabled) return;
+  btn.draggable = true;
+  btn.ondragstart = e => {
+    dragCode = code;
+    e.dataTransfer.setData('text/plain', String(code));
+    e.dataTransfer.effectAllowed = 'copy';
+    document.getElementById('kb').classList.add('dropping');
+  };
+  btn.ondragend = () => {
+    dragCode = null;
+    document.getElementById('kb').classList.remove('dropping');
+  };
 }
 
 // Two clicks, like calibration: this rewrites every key, so it should not be one stray tap.
@@ -2058,6 +2138,7 @@ document.getElementById('remapDefaults').onclick = async (e) => {
   }
   log('Remap: restored ' + n + ' keys' + (bad ? ', ' + bad + ' FAILED' : ''));
   saveState(bad ? 'Restore incomplete' : 'Factory layout restored', !!bad);
+  await refreshKeymap();
   renderRemap();
 };
 
