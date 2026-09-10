@@ -3,7 +3,7 @@
 Công cụ chỉnh bàn phím từ tính (Hall effect) **AE64 Pro** chạy thẳng trên trình duyệt,
 không cần cài phần mềm, không phụ thuộc web của hãng.
 
-Toàn bộ nằm trong **một file duy nhất**: `keyboard-control.html`. Không cần build,
+Toàn bộ nằm trong **một file duy nhất**: `index.html`. Không cần build,
 không thư viện, chỉ JavaScript thuần và WebHID.
 
 > **Chưa từng làm việc này bao giờ?** Đọc [HƯỚNG DẪN CHI TIẾT](HUONG-DAN.md) —
@@ -38,9 +38,15 @@ phát hiện và nói thẳng chuyện này ra.
 
 ## Chạy thế nào
 
-WebHID chỉ hoạt động trong **môi trường an toàn**. `https://` và `localhost` thì được,
-còn `file://` thì **không**. Nên nếu bạn bấm đúp vào file HTML, `navigator.hid` sẽ không
-tồn tại và nút Connect không thể hoạt động. Phải chạy qua localhost:
+**<https://punssama.github.io/AE64_PRO_WEB_DRIVER_CLONE/>** — mở lên và bấm
+**Connect keyboard**. Không phải clone, không phải cài gì, và **luôn là bản mới nhất**
+vì trang được phục vụ thẳng từ nhánh `main`.
+
+Sở dĩ phải có bản chạy trên mạng là vì WebHID chỉ hoạt động trong **môi trường an
+toàn**: `https://` và `localhost` thì được, `file://` thì **không**. Bấm đúp vào file
+HTML thì `navigator.hid` không tồn tại và nút Connect chết cứng.
+
+Muốn tự chạy bản của mình — offline, hoặc có sửa đổi — thì chạy qua localhost:
 
 ```sh
 git clone https://github.com/Punssama/AE64_PRO_WEB_DRIVER_CLONE.git
@@ -48,9 +54,9 @@ cd AE64_PRO_WEB_DRIVER_CLONE
 python -m http.server 8787
 ```
 
-Rồi mở <http://localhost:8787/keyboard-control.html> và bấm **Connect keyboard**.
-
-Máy chủ tĩnh nào cũng được; `python -m http.server` chỉ tiện vì không phải cài thêm gì.
+Rồi mở <http://localhost:8787/>. Máy chủ tĩnh nào cũng được; `python -m http.server`
+chỉ tiện vì không phải cài thêm gì. Thêm `?selftest` vào URL để chạy phần kiểm tra bộ
+lọc thiết bị trong console.
 
 **Trình duyệt:** WebHID có trên Chrome, Edge và các trình duyệt nhân Chromium.
 Firefox và Safari **không** hỗ trợ.

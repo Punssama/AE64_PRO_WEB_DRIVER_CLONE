@@ -40,6 +40,8 @@
   .titlebar { flex: none; display: flex; align-items: center; gap: 14px; background: var(--accent); border-bottom: 2px solid var(--ink); padding: 4px 12px; }
   .titlebar h1 { margin: 0; font-size: 20px; font-weight: normal; letter-spacing: .06em; }
   .titlebar .spacer { flex: 1; }
+  /* Which build someone is on, so "press Ctrl+F5" can be checked rather than guessed. */
+  #build { margin: 0; font-size: 14px; opacity: .65; }
   #status { margin: 0; }
   #status::before { content: '[ '; }
   #status::after { content: ' ]'; }
@@ -232,6 +234,7 @@
 <header class="titlebar">
   <h1>AE64 PRO TUNER</h1>
   <span class="spacer"></span>
+  <p id="build"></p>
   <p id="status">Not connected</p>
 </header>
 
@@ -761,39 +764,68 @@ function onInputReport(e) {
   if (waiters.length) waiters.shift()(data);
 }
 
+// The AE64 Pro's vendor id. Filtering on it is what keeps every other HID device on the
+// machine out of the picker - this used to offer all of them and would happily "connect"
+// to a mouse. Deliberately NOT filtering on productId: this board reports 0x300a, which
+// is absent from the vendor app's own 263-device list (nearest is 0x3007), so a
+// productId filter would lock out the very keyboard the tool is for. usagePage is left
+// out for the same reason - the vendor list carries two of them and neither is confirmed
+// against this board. Vendor plus the handshake below is strict enough.
+const HID_VENDOR = 0x1ca6;
+
 function pickControlDevice(devices) {
-  // The keyboard exposes several HID interfaces (media keys, etc).
-  // Only the one with an output report is the vendor control channel we can send commands to.
-  return devices.find(d => d.collections.some(c => c.outputReports?.length)) || devices[0];
+  // The keyboard exposes several HID interfaces (media keys, etc). Only the one with an
+  // output report is the vendor control channel commands can be sent to. Anything else
+  // cannot be talked to at all, so there is no sensible fallback to guess at.
+  return devices.find(d => d.vendorId === HID_VENDOR
+                        && d.collections.some(c => c.outputReports?.length)) || null;
 }
 
 async function useDevice(d) {
   setTravelTest(false);
   device = d;
   if (!device.opened) await device.open();
+  // Remove first: re-enumeration and a retry after a refused device both hand back the
+  // same HIDDevice object, and a second listener would shift each response out of
+  // `waiters` twice - every other answer would go missing.
+  device.removeEventListener('inputreport', onInputReport);
   device.addEventListener('inputreport', onInputReport);
+  // Talk to it BEFORE claiming a connection. This used to paint the titlebar green and
+  // then sit there timing out when the thing on the other end was not the keyboard.
+  // Configs are the right handshake anyway: which one is active decides what every
+  // later read returns, so it has to be first regardless.
+  if (!await loadConfigs()) {
+    try { await device.close(); } catch (err) { /* already gone */ }
+    resetDevice(d.vendorId === HID_VENDOR
+      ? 'The keyboard did not answer. It may still be restarting - press Connect again.'
+      : 'That is not an AE64 Pro control channel. Press Connect and pick the keyboard.');
+    return false;
+  }
   const st = document.getElementById('status');
   st.textContent = `Connected to ${device.productName}`;
   st.classList.add('live');
   updateKbVisibility();
   log(`Connected to ${device.productName} (vid=0x${device.vendorId.toString(16)} pid=0x${device.productId.toString(16)})`);
-  // Configs first: which one is active decides what every later read returns.
-  await loadConfigs();
   if (!document.getElementById('view-traveltest').hidden) setTravelTest(true);
   await fillFormFrom(selected.values().next().value);
   await loadAllModes();
   await loadLighting();
+  return true;
 }
 
 async function connect() {
   try {
     // Reuse a previously granted permission if we have one - avoids popping the
     // OS device picker again after e.g. a polling-rate change re-enumerates the device.
+    // Filtered too: a permission granted once to the wrong device used to be picked up
+    // here on every single load, silently, with no picker to correct it with.
     const known = pickControlDevice(await navigator.hid.getDevices());
     if (known) { await useDevice(known); return; }
-    const devices = await navigator.hid.requestDevice({ filters: [] });
-    if (!devices.length) { log('No device selected.'); return; }
-    await useDevice(pickControlDevice(devices));
+    const devices = await navigator.hid.requestDevice({ filters: [{ vendorId: HID_VENDOR }] });
+    if (!devices.length) { log('No device selected. Press Connect and pick the AE64 Pro.'); return; }
+    const d = pickControlDevice(devices);
+    if (!d) { log('That entry has no control channel. Press Connect and pick another.'); return; }
+    await useDevice(d);
   } catch (err) {
     log('Connect error: ' + err.message);
   }
@@ -801,7 +833,7 @@ async function connect() {
 
 // Some settings (e.g. polling rate) make the keyboard briefly re-enumerate over USB -
 // that's expected, not a fault. Auto-reopen instead of leaving the tool stuck.
-navigator.hid.addEventListener('connect', async ({ device: d }) => {
+navigator.hid?.addEventListener('connect', async ({ device: d }) => {
   if (device && d.vendorId === device.vendorId && d.productId === device.productId) {
     log('Device re-enumerated, reconnecting...');
     await useDevice(d);
@@ -842,9 +874,9 @@ async function sendAndWaitRaw(bytes, timeout = 1000) {
 
 document.getElementById('connect').onclick = connect;
 
-// Unplugging left the board on screen looking live, and every poll silently timing out.
-navigator.hid.addEventListener('disconnect', ({ device: d }) => {
-  if (!device || d.vendorId !== device.vendorId || d.productId !== device.productId) return;
+// Every way the device can go away lands here - unplugged, or a connect that turned out
+// to be talking to the wrong thing - so the two paths cannot drift apart.
+function resetDevice(msg) {
   setTravelTest(false);
   calibrating = false;
   device = null;
@@ -857,7 +889,13 @@ navigator.hid.addEventListener('disconnect', ({ device: d }) => {
   renderConfigPicker();
   renderLighting();
   updateKbVisibility();
-  log('Keyboard disconnected.');
+  log(msg);
+}
+
+// Unplugging left the board on screen looking live, and every poll silently timing out.
+navigator.hid?.addEventListener('disconnect', ({ device: d }) => {
+  if (!device || d.vendorId !== device.vendorId || d.productId !== device.productId) return;
+  resetDevice('Keyboard disconnected.');
 });
 
 // The keyboard stores 4 independent configs. Every per-key performance value belongs
@@ -895,12 +933,17 @@ document.getElementById('configSelect').onchange = e => switchConfig(Number(e.ta
 
 async function loadConfigs() {
   const list = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.List]);
-  configCount = list ? list[3] : 0;
+  // Doubles as the handshake. Something that is not the keyboard's control channel
+  // either never answers or answers something that is not our packet - checking the
+  // echoed category and subcommand catches both without a second round trip.
+  if (!list || list[0] !== CATEGORY.Global || list[1] !== GLOBAL_SUB.ConfigSwitch) return false;
+  configCount = list[3];
   const cur = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.Read]);
   currentConfig = cur ? cur[3] : null;
   for (let i = 0; i < configCount; i++) configNames.set(i, await getConfigName(i));
   renderConfigPicker();
   log(`Configs: ${configCount}, active = ${configLabel(currentConfig)}`);
+  return true;
 }
 
 async function switchConfig(id) {
@@ -1629,6 +1672,29 @@ function ledPreview(on) {
   if (on === ledRunning) return;
   ledRunning = on;
   if (on) ledLoop();
+}
+
+// Served from GitHub Pages this is the deploy date, which is the only version number
+// worth having for a single file that updates itself on every visit.
+document.getElementById('build').textContent = 'build ' + document.lastModified.slice(0, 10);
+
+// A public link means people will open this in Firefox or Safari, which have no WebHID
+// at all. Say so, instead of failing later with "cannot read properties of undefined".
+if (!navigator.hid) {
+  document.querySelector('#kbEmpty p').textContent =
+    'This browser has no WebHID. Open the page in Chrome or Edge.';
+  document.getElementById('connect').disabled = true;
+}
+
+// One net under the gate that decides what hardware this tool will talk to.
+if (location.search.includes('selftest')) {
+  const fake = (vendorId, out) => ({ vendorId, collections: [{ outputReports: out ? [{}] : [] }] });
+  const good = fake(HID_VENDOR, true);
+  console.assert(pickControlDevice([fake(0x046d, true)]) === null, 'wrong vendor must be refused');
+  console.assert(pickControlDevice([fake(HID_VENDOR, false)]) === null, 'no output report must be refused');
+  console.assert(pickControlDevice([fake(HID_VENDOR, false), good]) === good, 'control channel must be chosen');
+  console.assert(pickControlDevice([]) === null, 'nothing plugged in must be refused');
+  console.log('selftest done');
 }
 
 renderKeyboard();

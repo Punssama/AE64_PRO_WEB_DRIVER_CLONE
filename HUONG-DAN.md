@@ -3,23 +3,21 @@
 Hướng dẫn này viết cho người **chưa từng làm gì với dòng lệnh**. Bạn chỉ cần làm theo
 đúng thứ tự, không cần hiểu gì về lập trình.
 
-Lần đầu mất khoảng 10 phút. Những lần sau chỉ mất 10 giây.
+Mất khoảng 30 giây. Không phải tải gì về máy, không phải cài gì.
 
 ---
 
 ## Mục lục
 
 1. [Cần chuẩn bị gì](#1-cần-chuẩn-bị-gì)
-2. [Tải công cụ về máy](#2-tải-công-cụ-về-máy)
-3. [Cài Python](#3-cài-python--chỉ-làm-một-lần)
-4. [Mở công cụ lên](#4-mở-công-cụ-lên)
-5. [Kết nối bàn phím](#5-kết-nối-bàn-phím)
-6. [Hiểu các khái niệm](#6-hiểu-các-khái-niệm--phần-quan-trọng-nhất)
-7. [Chỉnh thông số phím](#7-chỉnh-thông-số-phím)
-8. [Kiểm tra xem có đúng không](#8-kiểm-tra-xem-có-đúng-không)
-9. [4 hồ sơ cấu hình](#9-4-hồ-sơ-cấu-hình)
-10. [Các tính năng còn lại](#10-các-tính-năng-còn-lại)
-11. [Lỗi thường gặp](#11-lỗi-thường-gặp)
+2. [Mở công cụ](#2-mở-công-cụ)
+3. [Kết nối bàn phím](#3-kết-nối-bàn-phím)
+4. [Hiểu các khái niệm](#4-hiểu-các-khái-niệm--phần-quan-trọng-nhất)
+5. [Chỉnh thông số phím](#5-chỉnh-thông-số-phím)
+6. [Kiểm tra xem có đúng không](#6-kiểm-tra-xem-có-đúng-không)
+7. [4 hồ sơ cấu hình](#7-4-hồ-sơ-cấu-hình)
+8. [Các tính năng còn lại](#8-các-tính-năng-còn-lại)
+9. [Lỗi thường gặp](#9-lỗi-thường-gặp)
 
 ---
 
@@ -33,94 +31,45 @@ Lần đầu mất khoảng 10 phút. Những lần sau chỉ mất 10 giây.
 
 ---
 
-## 2. Tải công cụ về máy
+## 2. Mở công cụ
 
-Cách dễ nhất, không cần cài thêm gì:
+Mở **Chrome** hoặc **Edge**, vào địa chỉ này:
 
-1. Vào <https://github.com/Punssama/AE64_PRO_WEB_DRIVER_CLONE>
-2. Bấm nút **Code** màu xanh lá
-3. Chọn **Download ZIP**
-4. Giải nén file vừa tải (chuột phải → *Extract All* trên Windows)
-5. Bạn sẽ có thư mục tên `AE64_PRO_WEB_DRIVER_CLONE-main`
+**<https://punssama.github.io/AE64_PRO_WEB_DRIVER_CLONE/>**
 
-**Ghi nhớ thư mục này nằm ở đâu.**
+Xong. Không tải gì về, không cài gì, không có cửa sổ đen nào cả.
 
----
+Bấm **Ctrl+D** lưu lại để lần sau vào thẳng.
 
-## 3. Cài Python — chỉ làm một lần
+### Làm sao có tính năng mới nhất?
 
-Công cụ cần một "máy chủ nhỏ" chạy trên máy bạn. Python có sẵn thứ đó.
+Cứ mở lại đúng cái link đó. Trang **luôn là bản mới nhất** — bạn không phải tải lại
+hay cập nhật gì cả. Nếu bạn để tab mở suốt nhiều ngày thì bấm **Ctrl+F5** một cái.
 
-**Kiểm tra xem đã có chưa.** Bấm phím Windows, gõ `cmd`, Enter. Trong cửa sổ đen gõ:
-
-```
-python --version
-```
-
-- Hiện dòng kiểu `Python 3.12.0` → **đã có rồi, bỏ qua mục này**
-- Báo lỗi không tìm thấy → làm tiếp bên dưới
-
-**Cài:**
-
-1. Vào <https://www.python.org/downloads/>
-2. Bấm nút vàng **Download Python**
-3. Chạy file vừa tải
-4. **RẤT QUAN TRỌNG:** ở màn hình đầu tiên, tick vào ô
-   **"Add python.exe to PATH"** ở dưới cùng, rồi mới bấm Install.
-   Quên bước này thì mục 4 sẽ báo lỗi.
-5. Cài xong, đóng cửa sổ đen và mở lại, thử `python --version` lần nữa
+Góc trên bên phải có dòng kiểu `build 09/10/2026`, cho biết bạn đang dùng bản ngày nào.
 
 ---
 
-## 4. Mở công cụ lên
-
-### Vì sao không bấm đúp vào file HTML được?
-
-Bấm đúp sẽ mở file theo kiểu `file://`. Trình duyệt **cấm** trang mở theo kiểu đó
-giao tiếp với thiết bị USB, vì lý do bảo mật. Nút Connect sẽ không hoạt động, mà cũng
-không báo lỗi gì. Bắt buộc phải chạy qua localhost.
-
-### Các bước
-
-**Bước 1.** Mở thư mục đã giải nén ở mục 2.
-
-**Bước 2.** Bấm vào **thanh địa chỉ** của cửa sổ thư mục (chỗ đang hiện đường dẫn),
-gõ đè lên đó chữ `cmd` rồi Enter. Cửa sổ đen hiện ra, **đang ở đúng thư mục**.
-
-**Bước 3.** Gõ dòng này rồi Enter:
-
-```
-python -m http.server 8787
-```
-
-**Bước 4.** Thấy dòng `Serving HTTP on :: port 8787` là chạy được.
-**Đừng đóng cửa sổ đen này** — đóng là công cụ tắt. Cứ thu nhỏ và để đó.
-
-**Bước 5.** Mở Chrome, vào địa chỉ:
-
-```
-http://localhost:8787/keyboard-control.html
-```
-
-**Lần sau chỉ cần làm lại bước 2, 3, 5.**
-
----
-
-## 5. Kết nối bàn phím
+## 3. Kết nối bàn phím
 
 1. Giữa màn hình có biểu tượng bàn phím và dòng **"No keyboard connected."**
    Bàn phím ảo chưa hiện là **đúng** — nó chỉ hiện khi đã kết nối thật.
 2. Bấm **Connect keyboard**
-3. Chrome hiện hộp thoại liệt kê thiết bị. Chọn dòng có chữ **AE64 Pro**, bấm **Connect**.
-   - Nếu có nhiều dòng giống nhau, thử dòng đầu tiên; không được thì bấm Connect lại
-     và thử dòng khác.
+3. Chrome hiện hộp thoại chọn thiết bị. Trong đó **chỉ có bàn phím AE64 Pro** —
+   công cụ đã lọc sẵn, chuột hay tai nghe của bạn không hiện ra để bấm nhầm.
+   Chọn nó rồi bấm **Connect**.
+   - Nếu thấy nhiều dòng giống hệt nhau, chọn dòng nào cũng được. Bàn phím có nhiều
+     cổng bên trong; công cụ tự tìm đúng cổng điều khiển.
 4. Góc trên bên phải đổi thành **`[ Connected to AE64 Pro ]`** và bàn phím ảo hiện ra.
+
+Nếu chọn phải thứ không nói chuyện được, công cụ **báo lỗi và quay về màn hình ban
+đầu** để bạn bấm Connect chọn lại — chứ không nằm im giả vờ đã kết nối.
 
 Lần sau Chrome nhớ quyền, bấm Connect là vào thẳng, không hỏi lại.
 
 ---
 
-## 6. Hiểu các khái niệm — phần quan trọng nhất
+## 4. Hiểu các khái niệm — phần quan trọng nhất
 
 Đọc xong phần này thì mọi thứ còn lại rất dễ.
 
@@ -192,7 +141,7 @@ là chống nhiễu, tránh phím tự ăn khi bạn chỉ đặt hờ tay lên.
 
 ---
 
-## 7. Chỉnh thông số phím
+## 5. Chỉnh thông số phím
 
 ### Bước 1 — Chọn phím
 
@@ -236,7 +185,7 @@ bản bị lặp chữ.
 
 ---
 
-## 8. Kiểm tra xem có đúng không
+## 6. Kiểm tra xem có đúng không
 
 Đây là tính năng hữu ích nhất, và web của hãng **không có**.
 
@@ -262,7 +211,7 @@ con số bạn cần hạ xuống.
 
 ---
 
-## 9. 4 hồ sơ cấu hình
+## 7. 4 hồ sơ cấu hình
 
 Bàn phím lưu sẵn **4 hồ sơ**, mỗi hồ sơ có bộ thông số riêng cho toàn bộ phím. Ví dụ
 một hồ sơ để chơi game, một hồ sơ để gõ văn bản.
@@ -274,7 +223,7 @@ Tên hồ sơ là tên đang lưu trong bàn phím. Chưa đặt tên thì hiệ
 
 ---
 
-## 10. Các tính năng còn lại
+## 8. Các tính năng còn lại
 
 ### Travel test — xem cả bàn phím
 
@@ -318,28 +267,27 @@ khi trục trặc thì đây là chỗ xem chuyện gì đã xảy ra.
 
 ---
 
-## 11. Lỗi thường gặp
+## 9. Lỗi thường gặp
 
 ### Bấm Connect mà không có gì xảy ra
 
-- Địa chỉ có bắt đầu bằng `http://localhost:8787/` không? Nếu là `file:///` thì sẽ
-  không bao giờ chạy được — quay lại [mục 4](#4-mở-công-cụ-lên).
-- Có đang dùng Firefox hoặc Safari không? Hai trình duyệt này không hỗ trợ.
+- Có đang dùng Firefox hoặc Safari không? Hai trình duyệt này không hỗ trợ. Ngay giữa
+  màn hình sẽ có dòng báo đúng như vậy.
+- Có mở đúng link ở [mục 2](#2-mở-công-cụ) không? Nếu địa chỉ bắt đầu bằng `file:///`
+  thì không bao giờ chạy được.
 
-### `python` không phải là lệnh hợp lệ
+### Hộp thoại chọn thiết bị trống trơn
 
-Python chưa cài, hoặc lúc cài quên tick **"Add python.exe to PATH"**. Cài lại và nhớ
-tick ô đó.
+Không tìm thấy bàn phím AE64 Pro nào. Kiểm tra:
 
-### Cửa sổ đen báo `Address already in use`
+- Dây USB đã cắm chưa (Bluetooth **không** dùng được)
+- Thử cổng USB khác, tránh dùng hub
+- Rút ra cắm lại rồi bấm Connect lần nữa
 
-Cổng 8787 đang bị chiếm. Đổi số khác:
+### Báo "The keyboard did not answer"
 
-```
-python -m http.server 8788
-```
-
-rồi mở `http://localhost:8788/keyboard-control.html`.
+Bàn phím đang khởi động lại — hay gặp nhất là ngay sau khi đổi **Polling rate**.
+Đợi vài giây rồi bấm **Connect keyboard** lần nữa.
 
 ### Trang treo, bấm gì cũng không được
 
@@ -358,7 +306,7 @@ trên trang, đừng để con trỏ nằm trong ô nhập liệu.
 - Có nhầm hồ sơ không? Kiểm tra ô **CONFIG** góc trên bên trái.
 - Vào **Travel test** kiểm tra xem phím có thật sự kích hoạt đúng chỗ không — rất có
   thể **vùng chết đang lấn át** thông số của bạn
-  (xem [mục 6](#6-hiểu-các-khái-niệm--phần-quan-trọng-nhất)).
+  (xem [mục 4](#4-hiểu-các-khái-niệm--phần-quan-trọng-nhất)).
 
 ### Rút bàn phím ra rồi cắm lại
 

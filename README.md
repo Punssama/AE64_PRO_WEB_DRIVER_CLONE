@@ -4,7 +4,7 @@ A standalone, single-file WebHID tool for configuring an **AE64 Pro** Hall-effec
 keyboard (Sparklink / StarFlash "星闪悦动", `vid=0x1ca6 pid=0x300a`) from the browser,
 without depending on the vendor's website.
 
-Everything lives in one file: `keyboard-control.html`. No build step, no dependencies,
+Everything lives in one file: `index.html`. No build step, no dependencies,
 no framework — vanilla JS and the WebHID API.
 
 > **Tiếng Việt:** [README.vi.md](README.vi.md) · [Hướng dẫn chi tiết cho người mới](HUONG-DAN.md)
@@ -45,9 +45,15 @@ this and says so outright.
 
 ## Running it
 
-WebHID is only available in a **secure context**. `https://` and `localhost` qualify —
-`file://` does not. If you just double-click the HTML file, `navigator.hid` is
-`undefined` and the Connect button cannot work. So serve it over localhost:
+**<https://punssama.github.io/AE64_PRO_WEB_DRIVER_CLONE/>** — open it and click
+**Connect keyboard**. Nothing to clone, nothing to install, and it is always the
+current build, because the page is served straight from `main`.
+
+WebHID is only available in a **secure context**, which is why a hosted page exists at
+all: `https://` and `localhost` qualify, `file://` does not. Double-clicking the HTML
+file leaves `navigator.hid` undefined and the Connect button dead.
+
+To run your own copy - offline, or with local edits - serve it over localhost:
 
 ```sh
 git clone https://github.com/Punssama/AE64_PRO_WEB_DRIVER_CLONE.git
@@ -55,9 +61,9 @@ cd AE64_PRO_WEB_DRIVER_CLONE
 python -m http.server 8787
 ```
 
-Then open <http://localhost:8787/keyboard-control.html> and click **Connect keyboard**.
-
-Any static server works; `python -m http.server` just happens to need no install.
+Then open <http://localhost:8787/>. Any static server works; `python -m http.server`
+just happens to need no install. Add `?selftest` to the URL to run the device-filter
+assertions in the console.
 
 **Browser support:** WebHID ships in Chrome, Edge and other Chromium browsers.
 Firefox and Safari do not implement it.
