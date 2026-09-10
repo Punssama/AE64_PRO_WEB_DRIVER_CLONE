@@ -349,8 +349,9 @@
         <button id="lightToggle" class="toggle" aria-pressed="false">
           <span>Lighting</span><span class="tog">OFF</span>
         </button>
+        <div class="pick" id="lightAreas"></div>
         <select id="lightModes" disabled></select>
-        <span class="hint" id="lightNote">Effects are stored in the keyboard - this picks one.</span>
+        <span class="hint" id="lightNote">Each area has its own effect and switch.</span>
       </div>
       <div class="fields">
         <div class="field"><label for="lightLum">Brightness %</label>
@@ -401,14 +402,25 @@ const LIGHT_OP = { Read: 1, Write: 2 };
 const LIGHT_CFG = { Base: 0, Palette: 1, ColorCorrection: 2 };
 const LIGHT_OPEN = { Close: 0, Open: 1 };
 // The official UI labels the firmware's effects L1..L23 and its own list is a plain
-// id 0..22 - no names, no gaps - so the mode byte is just the index.
-const LIGHT_MODE_COUNT = 23;
+// id 0..22 - no names, no gaps - so the mode byte is just the index. That list is shared
+// across every model though: THIS keyboard only uses the first 20 on the main LEDs and
+// the first 5 on the decorative strip, which is what the vendor app offers. The firmware
+// will happily store mode 25, so nothing here can be verified against the device - these
+// two numbers come from the vendor UI and are the only honest source for them.
+const LIGHT_MODE_COUNT = { keyboard: 20, decorate: 5 };
 // The SDK carries Brightness1..4 and Speed1..5 enums, but THIS firmware does not use
 // them: it reports 100 for both and stores whatever byte you send (200 echoes back as
 // 200, unclamped). So they are percentages, and the UI has to do the clamping - the
 // echo cannot be trusted to reject a bad value here.
 const LIGHT_PCT_MAX = 100;
-const AREA = { Keyboard: 0 };
+// Lighting areas: the main per-key LEDs, then up to five decorative strips (this board
+// has one, the underglow beneath the PCB). Each area keeps its OWN open/mode/brightness
+// /speed/colour - they are separate lights, not one light with a filter.
+// Which ones exist is asked of the device, not assumed: a read for a missing area comes
+// back with 255 in the area byte.
+const AREA = { Keyboard: 0, Decorate1: 1 };
+const AREA_ABSENT = 255;
+const areaName = a => (a === 0 ? 'Main keyboard' : 'Decorative ' + a);
 
 let device = null;
 let waiters = [];
@@ -815,7 +827,7 @@ navigator.hid.addEventListener('disconnect', ({ device: d }) => {
   st.textContent = 'Not connected';
   st.classList.remove('live');
   configCount = 0; currentConfig = null; configNames.clear();
-  lightState = null; palette = [];
+  lightState = null; palette = []; lightAreas = []; lightArea = AREA.Keyboard;
   renderConfigPicker();
   renderLighting();
   updateKbVisibility();
@@ -1329,22 +1341,26 @@ async function applyNow() {
 // means sending its number, not reproducing the animation.
 // Mirrors the device, same rule as the performance form: a write sends every field at
 // once, so a stale value on screen would silently overwrite a real one.
-let lightState = null;      // { open, mode, luminance, speed, direction, colorIdx }
-let lightOriginal = null;   // first thing ever read, so the user's own setup can be restored
+let lightState = null;      // { open, mode, luminance, speed, direction, colorIdx } of lightArea
+let lightOriginal = {};     // per area: first thing ever read, so the user's setup can be restored
 let palette = [];           // 8 x {r,g,b}
+let lightAreas = [];        // areas this keyboard actually has, discovered at connect
+let lightArea = AREA.Keyboard;
+const modeCount = a => (a === AREA.Keyboard ? LIGHT_MODE_COUNT.keyboard : LIGHT_MODE_COUNT.decorate);
 
 function decodeLight(res) {
   return { open: res[4] === 0 ? 0 : 1, mode: res[5], luminance: res[6],
            speed: res[7], direction: res[8], colorIdx: res[9] };
 }
 
-async function getLighting() {
-  const res = await sendAndWait([CATEGORY.Lighting, LIGHT_OP.Read, AREA.Keyboard, LIGHT_CFG.Base], 600);
-  return res ? decodeLight(res) : null;
+async function getLighting(area = lightArea) {
+  const res = await sendAndWait([CATEGORY.Lighting, LIGHT_OP.Read, area, LIGHT_CFG.Base], 600);
+  // A missing area answers with 255 where the area byte should be echoed back.
+  return res && res[2] !== AREA_ABSENT ? decodeLight(res) : null;
 }
 
-async function getPalette() {
-  const res = await sendAndWait([CATEGORY.Lighting, LIGHT_OP.Read, AREA.Keyboard, LIGHT_CFG.Palette], 600);
+async function getPalette(area = lightArea) {
+  const res = await sendAndWait([CATEGORY.Lighting, LIGHT_OP.Read, area, LIGHT_CFG.Palette], 600);
   if (!res) return [];
   const out = [];
   // Four bytes per slot, ordered B,G,R - not R,G,B - the same as the per-key colours.
@@ -1356,7 +1372,7 @@ async function setLighting(patch) {
   if (!device || !lightState) return;
   const want = Object.assign({}, lightState, patch);
   const res = await sendAndWait([
-    CATEGORY.Lighting, LIGHT_OP.Write, AREA.Keyboard, LIGHT_CFG.Base,
+    CATEGORY.Lighting, LIGHT_OP.Write, lightArea, LIGHT_CFG.Base,
     want.open, want.mode, want.luminance, want.speed, want.direction, want.colorIdx,
   ], 600);
   if (!res) { log('Lighting: no response to write.'); saveState('Lighting failed', true); return; }
@@ -1369,7 +1385,7 @@ async function setLighting(patch) {
     log('Lighting REJECTED -> ' + bad.map(k => k + '=' + after[k] + ' (wanted ' + want[k] + ')').join(', '));
     saveState('Lighting refused', true);
   } else {
-    log('Lighting: L' + (after.mode + 1) + ', brightness ' + after.luminance + '%, speed '
+    log(areaName(lightArea) + ': L' + (after.mode + 1) + ', brightness ' + after.luminance + '%, speed '
         + after.speed + '%, ' + (after.direction ? 'backward' : 'forward')
         + ', colour ' + (after.colorIdx + 1) + ', ' + (after.open ? 'on' : 'off'));
     saveState('Lighting saved');
@@ -1384,17 +1400,21 @@ function pickRow(el, count, current, label, onPick) {
     const b = document.createElement('button');
     if (i === current) b.className = 'on';
     b.textContent = label(i);
-    b.disabled = !lightState;
+    b.disabled = !lightState && el.id !== 'lightAreas';
     b.onclick = () => onPick(i);
     el.appendChild(b);
   }
 }
 
-// 23 effects will not fit a row of buttons in a 142px panel, so this one control is a
-// dropdown. The options never change - only the selection does.
+// 20 effects will not fit a row of buttons in a 142px panel, so this one control is a
+// dropdown. Its length depends on the area, so it is rebuilt when the area changes.
 const lightModeSel = document.getElementById('lightModes');
-for (let i = 0; i < LIGHT_MODE_COUNT; i++) lightModeSel.add(new Option('L' + (i + 1), i));
 lightModeSel.onchange = () => setLighting({ mode: +lightModeSel.value });
+function fillModes(n) {
+  if (lightModeSel.options.length === n) return;
+  lightModeSel.innerHTML = '';
+  for (let i = 0; i < n; i++) lightModeSel.add(new Option('L' + (i + 1), i));
+}
 
 function renderLighting() {
   const st = lightState;
@@ -1403,9 +1423,15 @@ function renderLighting() {
   btn.querySelector('.tog').textContent = st && st.open ? 'ON' : 'OFF';
   btn.disabled = !st;
 
+  // One button per area, but only for areas the keyboard reported having.
+  pickRow(document.getElementById('lightAreas'), lightAreas.length,
+          lightAreas.indexOf(lightArea), i => areaName(lightAreas[i]),
+          i => { lightArea = lightAreas[i]; loadLighting(); });
+
+  fillModes(modeCount(lightArea));
   lightModeSel.disabled = !st;
-  // A mode the dropdown does not list would leave a stale name showing, so blank it.
-  lightModeSel.value = st && st.mode < LIGHT_MODE_COUNT ? st.mode : '';
+  // A mode outside this area's range would leave a stale name showing, so blank it.
+  lightModeSel.value = st && st.mode < modeCount(lightArea) ? st.mode : '';
   for (const [id, key] of [['lightLum', 'luminance'], ['lightSpeed', 'speed']]) {
     const box = document.getElementById(id), slider = document.getElementById(id + '_r');
     box.disabled = slider.disabled = !st;
@@ -1428,12 +1454,18 @@ function renderLighting() {
 }
 
 async function loadLighting() {
+  if (!lightAreas.length) {
+    // Ask the device which areas it has rather than assuming a model. Decorate2..5 exist
+    // in the protocol but not on this board, and they answer 255 when asked.
+    for (let a = AREA.Keyboard; a <= 5; a++) if (await getLighting(a)) lightAreas.push(a);
+    log('Lighting areas: ' + (lightAreas.map(areaName).join(', ') || 'none'));
+  }
   lightState = await getLighting();
   palette = await getPalette();
-  if (lightState && !lightOriginal) {
-    lightOriginal = Object.assign({}, lightState);
+  if (lightState && !lightOriginal[lightArea]) {
+    lightOriginal[lightArea] = Object.assign({}, lightState);
     // Logged so the user's own setup can be put back after experimenting.
-    log('Lighting was: ' + JSON.stringify(lightOriginal));
+    log(areaName(lightArea) + ' was: ' + JSON.stringify(lightState));
   }
   renderLighting();
 }
