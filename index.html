@@ -583,6 +583,10 @@ function renderKeyboard() {
 async function toggleKey(row, col) {
   const rc = `${row}-${col}`;
   if (selected.has(rc)) { selected.delete(rc); updateSelectionUI(); return; }
+  // Remapping is one key at a time, so picking a second one there replaces the first
+  // rather than building a selection that can only produce "pick exactly one".
+  // Trigger settings are the opposite: they are meant to be written to a whole handful.
+  if (!document.getElementById('view-remap').hidden) selected.clear();
   selected.add(rc);
   updateSelectionUI();
   await fillFormFrom(rc);
@@ -2165,6 +2169,10 @@ async function assignTo(rc, code) {
   } else {
     log('Remap: ' + (remapLayer ? 'Fn+' : '') + KEY_LABEL.get(rc) + ' now sends ' + keyName(code));
     saveState('Remapped');
+    // Done with that key: drop the highlight so the board is ready for the next one, and
+    // a stale amber cap cannot be mistaken for the thing you are about to change.
+    // Only on success - a failed write leaves it picked so it can be retried.
+    setSelection([]);
   }
   // Believe the echo, not the request, and repaint from it.
   if (curRows && curRows[r]) { curRows[r][c] = after.code; paintCaps(); }
@@ -2230,9 +2238,9 @@ addEventListener('pointerup', e => {
   setTimeout(() => { justDragged = false; }, 0);
   const key = keyUnder(e.clientX, e.clientY);
   if (!key) return;
-  const rc = key.dataset.row + '-' + key.dataset.col;
-  setSelection([rc]);
-  assignTo(rc, d.code);
+  // No need to select it first - the drop already says which key, and a successful write
+  // clears the selection anyway.
+  assignTo(key.dataset.row + '-' + key.dataset.col, d.code);
 });
 
 // Two clicks, like calibration: this rewrites every key, so it should not be one stray tap.
