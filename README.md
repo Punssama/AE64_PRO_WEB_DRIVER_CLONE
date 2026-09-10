@@ -7,6 +7,8 @@ without depending on the vendor's website.
 Everything lives in one file: `keyboard-control.html`. No build step, no dependencies,
 no framework — vanilla JS and the WebHID API.
 
+> **Tiếng Việt:** [README.vi.md](README.vi.md) · [Hướng dẫn chi tiết cho người mới](HUONG-DAN.md)
+
 ## What it does
 
 - **Virtual keyboard picker** — click keys to select them, click again to deselect.
@@ -17,6 +19,12 @@ no framework — vanilla JS and the WebHID API.
 - **Dead zones** — top and bottom travel the keyboard ignores.
 - **Configs** — the keyboard stores 4 independent configs; switch between them and
   every setting follows.
+- **Travel test** — proves a key really fires where you configured it. Reads the
+  firmware's own actuation state alongside live travel, catches the switching edges and
+  compares them against your settings. Each press narrows the reading, so it converges
+  to roughly 0.01mm.
+- **Calibration** — has the firmware relearn each switch's top and bottom, showing which
+  keys you have already pressed.
 - **Polling rate** — 125 Hz to 8000 Hz.
 - **Per-key RGB** — lights each key by its mode (white = normal, red = Rapid Trigger).
 - **Travel gauge** — a live meter drawn from the key's real measured travel, read from
@@ -24,6 +32,16 @@ no framework — vanilla JS and the WebHID API.
 - **Raw HID log** — every packet in and out, so you can see exactly what was sent.
 
 Changes save the moment you make them; there is no Save button.
+
+### The dead-zone trap
+
+**The top dead zone swallows any trigger point shallower than itself.** With a 0.35mm
+dead zone and Rapid Trigger first-touch set to 0.10mm, the key fires at **0.35mm**, not
+0.10mm — silently, with nothing to tell you. The effective trigger depth is
+`max(your setting, top dead zone)`.
+
+Lower the dead zone below your trigger point to actually get it. Travel test detects
+this and says so outright.
 
 ## Running it
 
