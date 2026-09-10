@@ -1539,9 +1539,15 @@ function renderLighting() {
   pal.innerHTML = '';
   palette.forEach((c, i) => {
     const b = document.createElement('button');
+    // The first slot stores 0,0,0, but the board does NOT go dark on it: asked for that
+    // colour on L1 it lights every key in a full static hue sweep. It is a rainbow
+    // sentinel, not black, and a black square told the exact opposite story.
+    const rainbow = !c.r && !c.g && !c.b;
     b.className = 'swatch' + (st && st.colorIdx === i ? ' on' : '');
-    b.style.background = 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')';
-    b.title = 'Colour ' + (i + 1);
+    b.style.background = rainbow
+      ? 'linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)'
+      : 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')';
+    b.title = rainbow ? 'Rainbow' : 'Colour ' + (i + 1);
     b.disabled = !st;
     b.onclick = () => setLighting({ colorIdx: i });
     pal.appendChild(b);
