@@ -186,9 +186,17 @@
      active state as the sidebar, so "where am I" reads the same way everywhere. */
   .tabs { display: flex; gap: 6px; margin-bottom: 12px; align-items: center; }
   .tabs .hint { margin: 0; }
-  /* 86 assignable keys will not fit the panel, and a dropdown is not wanted here - so
-     the grid scrolls inside its own box rather than pushing the page around. */
-  .scroller { max-height: 96px; overflow-y: auto; align-content: flex-start; }
+  /* The key picker is drawn as a keyboard, so there is nothing to scroll and nothing to
+     hunt for - the key you want is where your fingers expect it. */
+  /* The picker is the tallest thing in this view, so its tab strip gets a tighter gap
+     than the settings one, which has room to spare. */
+  #view-remap .tabs { margin-bottom: 6px; }
+  .kp { display: flex; gap: 9px; align-items: flex-start; }
+  .kp-block { display: flex; flex-direction: column; gap: 2px; }
+  .kp-row { display: flex; gap: 2px; }
+  .kp-row button { height: 17px; min-width: 0; padding: 0; font-size: 12px; line-height: 1;
+                   box-shadow: 1px 1px 0 var(--ink); overflow: hidden; }
+  .kp-row button.on, .kp-row button.on:hover { background: var(--ink); color: var(--accent); }
   .tab { min-width: 150px; padding: 5px 12px; font-size: 17px; text-align: center; box-shadow: none; }
   .tab.active, .tab.active:hover { background: var(--ink); color: var(--accent); }
 
@@ -382,8 +390,8 @@
         <span class="spacer"></span>
         <button id="remapDefaults" class="danger" data-armed="0">Restore factory layout</button>
       </div>
-      <div class="tabpane" id="tab-rk"><div class="pick scroller" id="remapKeys"></div></div>
-      <div class="tabpane" id="tab-rf" hidden><div class="pick scroller" id="remapFns"></div></div>
+      <div class="tabpane" id="tab-rk"><div class="kp" id="remapKeys"></div></div>
+      <div class="tabpane" id="tab-rf" hidden><div class="pick" id="remapFns"></div></div>
     </div>
 
     <div class="view" id="view-light" hidden>
@@ -1844,7 +1852,7 @@ if (!navigator.hid) {
 const HID_ODD = {
   40: 'Enter', 41: 'Esc', 42: 'Backspace', 43: 'Tab', 44: 'Space', 45: '-', 46: '=',
   47: '[', 48: ']', 49: '\\', 51: ';', 52: "'", 53: '`', 54: ',', 55: '.', 56: '/',
-  57: 'Caps Lock', 71: 'Scroll Lock', 72: 'Pause', 73: 'Insert', 74: 'Home', 75: 'Page Up',
+  57: 'Caps Lock', 70: 'Print Screen', 71: 'Scroll Lock', 72: 'Pause', 73: 'Insert', 74: 'Home', 75: 'Page Up',
   76: 'Delete', 77: 'End', 78: 'Page Down', 79: 'Right arrow', 80: 'Left arrow',
   81: 'Down arrow', 82: 'Up arrow', 101: 'Menu', 224: 'Left Ctrl', 225: 'Left Shift',
   226: 'Left Alt', 227: 'Left Win', 228: 'Right Ctrl', 229: 'Right Shift',
@@ -1866,7 +1874,8 @@ let defaultRows = null;   // the factory layout, kept because it is the way back
 // Straight out of the vendor's own code table. NOT verified on this board - the restore
 // button is what makes trying them safe.
 // Every standard key, not just the ones this board happens to have - Page Up is a
-// perfectly good thing to put on a 64-key board that has no Page Up of its own.
+// perfectly good thing to put on a 64-key board that has no Page Up of its own. Kept as
+// the reference the hand-written picker layout is checked against.
 const REMAP_KEYS = [];
 for (let code = 4; code <= 231; code++) if (hidName(code)) REMAP_KEYS.push(code);
 
@@ -1897,8 +1906,73 @@ async function loadKeymap() {
   }
   for (const [code, label] of SPECIAL_CODES) codeLabel.set(code, label);
 
-  log('Remap: factory layout read, ' + REMAP_KEYS.length + ' keys offered.');
+  log('Remap: factory layout read, ' + REMAP_KEYS.length + ' keys on the picker.');
   return true;
+}
+
+// The picker is a keyboard, not a list. 87 buttons in a wrapping grid meant scrolling and
+// hunting; laid out where the keys actually sit, you find one by muscle memory. Widths in
+// units, the same proportions the vendor's own picker uses (its `specialSize` table reads
+// as 1u = 50px: space 314, backspace 106, caps 93, enter 118, right shift 146).
+// Wide but short: the panel has width to spare and none to spare in height, so the
+// legends get room without the picker growing.
+const KP_U = 29, KP_GAP = 2;
+const PICKER_MAIN = [
+  [[41, 1], [null, .5], [58, 1], [59, 1], [60, 1], [61, 1], [null, .5], [62, 1], [63, 1], [64, 1], [65, 1], [null, .5], [66, 1], [67, 1], [68, 1], [69, 1]],
+  [[53, 1], [30, 1], [31, 1], [32, 1], [33, 1], [34, 1], [35, 1], [36, 1], [37, 1], [38, 1], [39, 1], [45, 1], [46, 1], [42, 2]],
+  [[43, 1.5], [20, 1], [26, 1], [8, 1], [21, 1], [23, 1], [28, 1], [24, 1], [12, 1], [18, 1], [19, 1], [47, 1], [48, 1], [49, 1.5]],
+  [[57, 1.75], [4, 1], [22, 1], [7, 1], [9, 1], [10, 1], [11, 1], [13, 1], [14, 1], [15, 1], [51, 1], [52, 1], [40, 2.25]],
+  [[225, 2.25], [29, 1], [27, 1], [6, 1], [25, 1], [5, 1], [17, 1], [16, 1], [54, 1], [55, 1], [56, 1], [229, 2.75]],
+  [[224, 1.25], [227, 1.25], [226, 1.25], [44, 6.25], [230, 1.25], [231, 1.25], [101, 1.25], [228, 1.25]],
+];
+// Same three-wide cluster the vendor lays out in its section 3.
+const PICKER_NAV = [
+  [[70, 1], [71, 1], [72, 1]],
+  [[73, 1], [74, 1], [75, 1]],
+  [[76, 1], [77, 1], [78, 1]],
+  [[null, 3]],
+  [[null, 1], [82, 1], [null, 1]],
+  [[80, 1], [81, 1], [79, 1]],
+];
+// Short legends: the full names do not fit a 23px key.
+const KP_SHORT = { 41: 'Esc', 42: 'Bksp', 43: 'Tab', 44: '', 45: '-', 46: '=', 57: 'Caps',
+  40: 'Enter', 70: 'Prt', 71: 'Scr', 72: 'Pause', 73: 'Ins', 74: 'Home', 75: 'PgUp',
+  76: 'Del', 77: 'End', 78: 'PgDn', 79: '\u2192', 80: '\u2190', 81: '\u2193', 82: '\u2191',
+  101: 'Menu', 224: 'Ctrl', 225: 'Shift', 226: 'Alt', 227: 'Win', 228: 'Ctrl',
+  229: 'Shift', 230: 'Alt', 231: 'Win' };
+const kpLabel = code => (KP_SHORT[code] !== undefined ? KP_SHORT[code] : hidName(code));
+
+function kpRows(rows, current, onPick, off) {
+  const box = document.createElement('div');
+  box.className = 'kp-block';
+  for (const row of rows) {
+    const line = document.createElement('div');
+    line.className = 'kp-row';
+    for (const [code, w] of row) {
+      const px = w * KP_U - KP_GAP;
+      if (code === null) {
+        const gap = document.createElement('span');
+        gap.style.width = px + 'px';
+        line.appendChild(gap);
+        continue;
+      }
+      const b = document.createElement('button');
+      b.textContent = kpLabel(code);
+      b.title = hidName(code);
+      b.style.width = px + 'px';
+      if (code === current) b.className = 'on';
+      b.disabled = off;
+      b.onclick = () => onPick(code);
+      line.appendChild(b);
+    }
+    box.appendChild(line);
+  }
+  return box;
+}
+
+function renderPicker(el, current, onPick, off) {
+  el.innerHTML = '';
+  el.append(kpRows(PICKER_MAIN, current, onPick, off), kpRows(PICKER_NAV, current, onPick, off));
 }
 
 // One key at a time on purpose. The performance tab writes the whole form to every
@@ -1921,9 +1995,7 @@ async function renderRemap() {
     who.textContent = KEY_LABEL.get(rc) + ' sends: ' + keyName(code);
   }
   const off = !rc || !device;
-  pickRow(document.getElementById('remapKeys'), REMAP_KEYS.length,
-          REMAP_KEYS.indexOf(code), i => hidName(REMAP_KEYS[i]),
-          i => assignKey(REMAP_KEYS[i]), off);
+  renderPicker(document.getElementById('remapKeys'), code, assignKey, off);
   pickRow(document.getElementById('remapFns'), SPECIAL_CODES.length,
           SPECIAL_CODES.findIndex(x => x[0] === code), i => SPECIAL_CODES[i][1],
           i => assignKey(SPECIAL_CODES[i][0]), off);
@@ -2008,6 +2080,12 @@ if (location.search.includes('selftest')) {
   console.assert(isBright(0, 255, 0), 'so does pure green, which an average would call dark');
   console.assert(!isBright(255, 0, 0) && !isBright(0, 0, 255), 'red and blue keep a white legend');
   console.assert(!isBright(12, 31, 25), 'an unlit key keeps a white legend');
+  // The picker layout is hand-written data, which is the kind that rots quietly. Check it
+  // against the generated key list rather than trusting a count.
+  const laid = [].concat(...PICKER_MAIN, ...PICKER_NAV).map(e => e[0]).filter(c => c !== null);
+  console.assert(laid.length === new Set(laid).size, 'no key is on the picker twice');
+  console.assert(REMAP_KEYS.every(c => laid.includes(c)), 'every nameable key is on the picker');
+  console.assert(laid.every(c => hidName(c)), 'every picker key has a name');
   console.log('selftest done');
 }
 
