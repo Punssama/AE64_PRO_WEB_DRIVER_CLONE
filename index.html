@@ -399,11 +399,10 @@
     <div class="view" id="view-remap" hidden>
       <div class="tabs">
         <button class="tab active" data-tab="rk">Keys</button>
-        <button class="tab" data-tab="rf">Functions</button>
-        <div class="pick" id="remapLayers"></div>
+        <button class="tab" data-tab="rf">Functions (Fn +)</button>
         <span class="hint" id="remapWho">Pick one key on the keyboard above.</span>
         <span class="spacer"></span>
-        <button id="remapDefaults" class="danger" data-armed="0">Restore factory layout</button>
+        <button id="remapDefaults" class="danger" data-armed="0">Restore base layer</button>
       </div>
       <div class="tabpane" id="tab-rk"><div class="kp" id="remapKeys"></div></div>
       <div class="tabpane" id="tab-rf" hidden><div class="pick" id="remapFns"></div></div>
@@ -658,6 +657,14 @@ for (const group of document.querySelectorAll('.tabs')) {
       for (const p of view.querySelectorAll('.tabpane')) p.hidden = p.id !== 'tab-' + t.dataset.tab;
     };
   }
+}
+
+// The Keys tab edits the key itself, the Functions tab edits what Fn+key does - so the
+// tab is the layer switch, rather than a second pair of buttons saying the same thing.
+// Registered after the switcher above: listeners run in the order they were added, and
+// this one has to read the tab state it just changed.
+for (const t of document.querySelectorAll('#view-remap .tab')) {
+  t.addEventListener('click', () => setRemapLayer(t.dataset.tab === 'rf' ? 1 : 0));
 }
 
 
@@ -2102,11 +2109,13 @@ async function setRemapLayer(n) {
     // of that, but they are the only warning available, so refuse rather than risk it.
     if (n !== 0 && layerCache[0]
         && JSON.stringify(layerCache[n].def) === JSON.stringify(layerCache[0].def)) {
-      log('Remap: the FN layer came back identical to the base layer, so this keyboard may not have one. Staying on the base layer rather than risk overwriting real keys.');
+      log('Remap: the FN layer came back identical to the base layer, so this keyboard may not have one. Staying on the Keys tab rather than risk overwriting real keys.');
       saveState('No separate FN layer', true);
       remapLayer = 0;
       defaultRows = curRows = null;
       if (await loadKeymap()) await refreshKeymap();
+      // Put the tab back too, or the UI claims to be somewhere it is not.
+      document.querySelector('#view-remap [data-tab="rk"]').click();
       renderRemap();
       return;
     }
@@ -2129,11 +2138,6 @@ function renderRemap() {
     code = curRows && curRows[r] ? curRows[r][c] : -1;
     who.textContent = (remapLayer ? 'Fn + ' : '') + KEY_LABEL.get(rc) + ' sends: ' + keyName(code);
   }
-  // Which layer is being edited. This is the vendor's FN switch: on the base layer a
-  // function REPLACES the key, on the FN layer it is what Fn+key does and the key itself
-  // still works.
-  pickRow(document.getElementById('remapLayers'), 2, remapLayer,
-          i => (i ? 'FN' : 'Base'), setRemapLayer, !device);
   const arm = document.getElementById('remapDefaults');
   if (arm.dataset.armed !== '1') arm.textContent = 'Restore ' + (remapLayer ? 'FN layer' : 'base layer');
   const off = !device;
