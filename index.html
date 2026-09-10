@@ -142,6 +142,10 @@
   /* While a key is being dragged out of the picker, every cap is a target. */
   #kb.dropping .kb-key { outline: 1px dashed rgba(18,53,43,.45); outline-offset: -3px; }
   #kb .kb-key.droptarget { background: var(--accent); outline: 2px solid var(--ink); outline-offset: -2px; }
+  /* Follows the pointer so you can see what you are carrying. */
+  .dragghost { position: fixed; z-index: 9; pointer-events: none; transform: translate(10px, 10px);
+               background: var(--ink); color: var(--accent); font-family: var(--term); font-size: 13px;
+               padding: 2px 7px; border: 2px solid var(--accent); }
   /* Calibration progress: a key the firmware has finished learning. */
   #kb .kb-key.done { background: var(--desk); }
 
@@ -568,23 +572,6 @@ function renderKeyboard() {
     btn.dataset.row = row;
     btn.dataset.col = col;
     btn.onclick = () => toggleKey(row, col);
-    // Drop target for the remap picker. Only ever armed while a drag from the picker is
-    // in flight, so ordinary clicking is untouched.
-    btn.ondragover = e => {
-      if (dragCode === null) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-      btn.classList.add('droptarget');
-    };
-    btn.ondragleave = () => btn.classList.remove('droptarget');
-    btn.ondrop = e => {
-      e.preventDefault();
-      btn.classList.remove('droptarget');
-      const code = Number(e.dataTransfer.getData('text/plain'));
-      if (!Number.isFinite(code)) return;
-      setSelection([rc]);
-      assignTo(rc, code);
-    };
     kb.appendChild(btn);
   });
   updateSelectionUI();
@@ -1902,7 +1889,8 @@ const codeLabel = new Map();
 const keyName = code => hidName(code) || codeLabel.get(code) || ('code ' + code);
 let defaultRows = null;   // the factory layout, kept because it is the way back
 let curRows = null;      // what each key sends right now, cached so drawing never awaits
-let dragCode = null;     // the code being dragged out of the picker
+let drag = null;         // an in-flight drag out of the picker
+let justDragged = false; // so the click that follows a drop does not write twice
 
 // Straight out of the vendor's own code table. NOT verified on this board - the restore
 // button is what makes trying them safe.
@@ -2097,24 +2085,69 @@ async function assignTo(rc, code) {
   renderRemap();
 }
 
-const assignKey = code => assignTo(remapTarget(), code);
+// Clicking needs a target; dragging brings its own. Saying so beats doing nothing.
+function assignKey(code) {
+  if (justDragged) { justDragged = false; return; }
+  const rc = remapTarget();
+  if (!rc) {
+    log('Remap: pick one key on the board first, or drag this key onto it.');
+    saveState('Pick a key on the board first', true);
+    return;
+  }
+  return assignTo(rc, code);
+}
 
-// Dragging is the natural gesture here - you are moving a key onto a key - and it drops
-// on whatever you aim at, so it does not need anything selected first.
+// Pointer events, not HTML5 drag-and-drop. Chrome will not start a native drag from a
+// <button>, so `draggable = true` on these did nothing at all - and a test that fires
+// DragEvents by hand passes anyway, because it proves the handlers, never the gesture.
+// This also works with a finger and needs no drop handlers on the 64 keycaps.
 function makeDraggable(btn, code) {
   if (btn.disabled) return;
-  btn.draggable = true;
-  btn.ondragstart = e => {
-    dragCode = code;
-    e.dataTransfer.setData('text/plain', String(code));
-    e.dataTransfer.effectAllowed = 'copy';
-    document.getElementById('kb').classList.add('dropping');
-  };
-  btn.ondragend = () => {
-    dragCode = null;
-    document.getElementById('kb').classList.remove('dropping');
+  btn.style.touchAction = 'none';
+  btn.onpointerdown = e => {
+    if (e.button === 0) drag = { code, x: e.clientX, y: e.clientY, moved: false, label: btn.title || btn.textContent };
   };
 }
+
+const keyUnder = (x, y) => {
+  const el = document.elementFromPoint(x, y);
+  return el && el.closest ? el.closest('#kb .kb-key') : null;
+};
+
+addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.moved) {
+    // A few pixels of slop, so a slightly shaky click is still a click.
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
+    drag.moved = true;
+    drag.ghost = document.createElement('div');
+    drag.ghost.className = 'dragghost';
+    drag.ghost.textContent = drag.label;
+    document.body.appendChild(drag.ghost);
+    document.getElementById('kb').classList.add('dropping');
+  }
+  drag.ghost.style.left = e.clientX + 'px';
+  drag.ghost.style.top = e.clientY + 'px';
+  const over = keyUnder(e.clientX, e.clientY);
+  for (const el of keyEl.values()) el.classList.toggle('droptarget', el === over);
+});
+
+addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  if (d.ghost) d.ghost.remove();
+  document.getElementById('kb').classList.remove('dropping');
+  for (const el of keyEl.values()) el.classList.remove('droptarget');
+  if (!d.moved) return;                  // never left the button: let the click stand
+  justDragged = true;
+  setTimeout(() => { justDragged = false; }, 0);
+  const key = keyUnder(e.clientX, e.clientY);
+  if (!key) return;
+  const rc = key.dataset.row + '-' + key.dataset.col;
+  setSelection([rc]);
+  assignTo(rc, d.code);
+});
 
 // Two clicks, like calibration: this rewrites every key, so it should not be one stray tap.
 document.getElementById('remapDefaults').onclick = async (e) => {
