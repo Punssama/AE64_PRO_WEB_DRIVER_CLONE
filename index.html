@@ -106,6 +106,12 @@
   #kbEmpty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 256px; color: var(--muted); }
   #kbEmpty p { margin: 0; }
   #kbEmpty .kbicon { font-size: 64px; line-height: 1; color: var(--ink); opacity: .45; }
+  /* Deliberately quiet: the filtered picker is right for almost everyone, and the
+     handshake still has to pass either way, so this is an escape hatch, not a choice. */
+  #connectAny { background: none; border: none; box-shadow: none; padding: 2px; font-size: 15px;
+                color: var(--muted); text-decoration: underline; }
+  #connectAny:hover { background: none; color: var(--ink); }
+  #connectAny:active { transform: none; }
   #kbTools { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
   /* The keycaps used to be the same cream as the panel behind them, so the whole board
      melted into the background. Caps are now lighter than the panel and the bezel is
@@ -263,6 +269,7 @@
       <div class="kbicon">&#9000;</div>
       <p>No keyboard connected.</p>
       <button id="connect">Connect keyboard</button>
+      <button id="connectAny">Keyboard not in the list?</button>
     </div>
     <div id="kbTools">
       <button id="selWasd">WASD</button>
@@ -771,13 +778,21 @@ function onInputReport(e) {
 // productId filter would lock out the very keyboard the tool is for. usagePage is left
 // out for the same reason - the vendor list carries two of them and neither is confirmed
 // against this board. Vendor plus the handshake below is strict enough.
-const HID_VENDOR = 0x1ca6;
+// A USB vendor id belongs to a MANUFACTURER, not to an individual keyboard - every
+// AE64 Pro off the same line reports the same one, so filtering on it does not lock
+// anyone out of their own board. What does vary is the brand it is sold under: the
+// vendor's own app ships filters for seven vendor ids (0x1ca6 covers 248 of its 263
+// listed models, the other six are rebrands), so all seven are honoured here.
+// Not filtering on productId, and not treating this list as complete: this very board
+// reports 0x300a, which is absent from that 263-model list. If the vendor's own app
+// does not know every model, neither does this - hence `connectAny()` below.
+const HID_VENDORS = [0x1ca6, 0x38a6, 0x1a86, 0x391d, 0x371c, 0x3806, 0x31e3];
 
-function pickControlDevice(devices) {
+function pickControlDevice(devices, anyVendor = false) {
   // The keyboard exposes several HID interfaces (media keys, etc). Only the one with an
   // output report is the vendor control channel commands can be sent to. Anything else
   // cannot be talked to at all, so there is no sensible fallback to guess at.
-  return devices.find(d => d.vendorId === HID_VENDOR
+  return devices.find(d => (anyVendor || HID_VENDORS.includes(d.vendorId))
                         && d.collections.some(c => c.outputReports?.length)) || null;
 }
 
@@ -796,7 +811,7 @@ async function useDevice(d) {
   // later read returns, so it has to be first regardless.
   if (!await loadConfigs()) {
     try { await device.close(); } catch (err) { /* already gone */ }
-    resetDevice(d.vendorId === HID_VENDOR
+    resetDevice(HID_VENDORS.includes(d.vendorId)
       ? 'The keyboard did not answer. It may still be restarting - press Connect again.'
       : 'That is not an AE64 Pro control channel. Press Connect and pick the keyboard.');
     return false;
@@ -813,17 +828,21 @@ async function useDevice(d) {
   return true;
 }
 
-async function connect() {
+async function connect(anyVendor = false) {
   try {
-    // Reuse a previously granted permission if we have one - avoids popping the
-    // OS device picker again after e.g. a polling-rate change re-enumerates the device.
-    // Filtered too: a permission granted once to the wrong device used to be picked up
-    // here on every single load, silently, with no picker to correct it with.
-    const known = pickControlDevice(await navigator.hid.getDevices());
+    // Reuse a previously granted permission if we have one - avoids popping the OS
+    // device picker again after e.g. a polling-rate change re-enumerates the device.
+    // A known vendor wins; failing that, anything already granted with a control
+    // channel is tried, so a board reached through "not listed" below still opens by
+    // itself next time. The handshake in useDevice() is what actually vets it, which
+    // is why a wrong device granted once now fails loudly instead of silently.
+    const granted = await navigator.hid.getDevices();
+    const known = pickControlDevice(granted) || pickControlDevice(granted, true);
     if (known) { await useDevice(known); return; }
-    const devices = await navigator.hid.requestDevice({ filters: [{ vendorId: HID_VENDOR }] });
+    const filters = anyVendor ? [] : HID_VENDORS.map(vendorId => ({ vendorId }));
+    const devices = await navigator.hid.requestDevice({ filters });
     if (!devices.length) { log('No device selected. Press Connect and pick the AE64 Pro.'); return; }
-    const d = pickControlDevice(devices);
+    const d = pickControlDevice(devices, anyVendor);
     if (!d) { log('That entry has no control channel. Press Connect and pick another.'); return; }
     await useDevice(d);
   } catch (err) {
@@ -872,7 +891,11 @@ async function sendAndWaitRaw(bytes, timeout = 1000) {
   return p;
 }
 
-document.getElementById('connect').onclick = connect;
+document.getElementById('connect').onclick = () => connect();
+// Every AE64 Pro shares its maker's vendor id, but the same board is resold under other
+// brands and the vendor's own model list is demonstrably incomplete - this board is not
+// in it. So there is a way past the filter; the handshake still decides.
+document.getElementById('connectAny').onclick = () => connect(true);
 
 // Every way the device can go away lands here - unplugged, or a connect that turned out
 // to be talking to the wrong thing - so the two paths cannot drift apart.
@@ -1684,16 +1707,21 @@ if (!navigator.hid) {
   document.querySelector('#kbEmpty p').textContent =
     'This browser has no WebHID. Open the page in Chrome or Edge.';
   document.getElementById('connect').disabled = true;
+  document.getElementById('connectAny').hidden = true;
 }
 
 // One net under the gate that decides what hardware this tool will talk to.
 if (location.search.includes('selftest')) {
   const fake = (vendorId, out) => ({ vendorId, collections: [{ outputReports: out ? [{}] : [] }] });
-  const good = fake(HID_VENDOR, true);
+  const good = fake(HID_VENDORS[0], true);
   console.assert(pickControlDevice([fake(0x046d, true)]) === null, 'wrong vendor must be refused');
-  console.assert(pickControlDevice([fake(HID_VENDOR, false)]) === null, 'no output report must be refused');
-  console.assert(pickControlDevice([fake(HID_VENDOR, false), good]) === good, 'control channel must be chosen');
+  console.assert(pickControlDevice([fake(HID_VENDORS[0], false)]) === null, 'no output report must be refused');
+  console.assert(pickControlDevice([fake(HID_VENDORS[0], false), good]) === good, 'control channel must be chosen');
   console.assert(pickControlDevice([]) === null, 'nothing plugged in must be refused');
+  console.assert(pickControlDevice([fake(0x38a6, true)]) !== null, 'a rebrand vendor must be allowed');
+  const odd = fake(0x9999, true);
+  console.assert(pickControlDevice([odd]) === null, 'unknown vendor refused by default');
+  console.assert(pickControlDevice([odd], true) === odd, 'unknown vendor allowed via the escape hatch');
   console.log('selftest done');
 }
 

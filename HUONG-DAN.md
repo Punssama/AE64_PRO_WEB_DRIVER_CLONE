@@ -55,8 +55,8 @@ Góc trên bên phải có dòng kiểu `build 09/10/2026`, cho biết bạn đa
 1. Giữa màn hình có biểu tượng bàn phím và dòng **"No keyboard connected."**
    Bàn phím ảo chưa hiện là **đúng** — nó chỉ hiện khi đã kết nối thật.
 2. Bấm **Connect keyboard**
-3. Chrome hiện hộp thoại chọn thiết bị. Trong đó **chỉ có bàn phím AE64 Pro** —
-   công cụ đã lọc sẵn, chuột hay tai nghe của bạn không hiện ra để bấm nhầm.
+3. Chrome hiện hộp thoại chọn thiết bị. Trong đó **chỉ có bàn phím** — công cụ lọc
+   theo mã hãng, nên chuột hay tai nghe của bạn không hiện ra để bấm nhầm.
    Chọn nó rồi bấm **Connect**.
    - Nếu thấy nhiều dòng giống hệt nhau, chọn dòng nào cũng được. Bàn phím có nhiều
      cổng bên trong; công cụ tự tìm đúng cổng điều khiển.
@@ -278,11 +278,18 @@ khi trục trặc thì đây là chỗ xem chuyện gì đã xảy ra.
 
 ### Hộp thoại chọn thiết bị trống trơn
 
-Không tìm thấy bàn phím AE64 Pro nào. Kiểm tra:
+Không tìm thấy bàn phím nào khớp bộ lọc. Kiểm tra theo thứ tự:
 
 - Dây USB đã cắm chưa (Bluetooth **không** dùng được)
 - Thử cổng USB khác, tránh dùng hub
 - Rút ra cắm lại rồi bấm Connect lần nữa
+
+Vẫn không thấy? Bàn phím của bạn có thể được bán dưới **thương hiệu khác** với mã hãng
+mà tôi chưa biết. Bấm dòng chữ nhỏ **"Keyboard not in the list?"** ngay dưới nút
+Connect — nó mở hộp thoại **không lọc**, hiện mọi thiết bị. Chọn bàn phím của bạn;
+nếu chọn nhầm thứ khác thì công cụ vẫn kiểm tra và từ chối, không hỏng gì cả.
+
+Nếu cách đó chạy được, **báo cho tôi biết** để tôi thêm mã hãng của bạn vào bộ lọc.
 
 ### Báo "The keyboard did not answer"
 
