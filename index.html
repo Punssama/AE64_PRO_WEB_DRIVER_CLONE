@@ -56,6 +56,28 @@
   #connectOverlay p { margin: 0; background: var(--surface); border: 2px solid var(--ink); padding: 14px 22px; box-shadow: 5px 5px 0 rgba(18,53,43,.45); font-size: 18px; }
   #connectOverlay p::after { content: '_'; animation: connectBlink 1s step-end infinite; }
   @keyframes connectBlink { 50% { opacity: 0; } }
+  /* DKS/MPT/MT/TGL/END each need 1-4 keycode slots, and there is nowhere near enough
+     room in the Advanced-keys tabpane for a full-size Remap-style picker per slot. This
+     overlay borrows the same "flag under the gate" idea as #connectOverlay: an absolute
+     panel over the whole app, shown only while a slot is actively being picked, built
+     from the same kpRows()/PICKER_MAIN/PICKER_NAV the Remap view already uses, just at
+     a fixed compact size instead of one measured against a view's free space. */
+  #kcOverlay { position: absolute; inset: 0; z-index: 21; display: flex; align-items: center; justify-content: center; background: rgba(18,53,43,.55); }
+  #kcOverlay .panel { background: var(--surface); box-shadow: 6px 6px 0 rgba(18,53,43,.45); display: flex; flex-direction: column; gap: 8px; }
+  #kcOverlay .hint { margin: 0; }
+  /* One line, label then value - the same shape as the Key 1/Key 2 readout in SOCD/RS -
+     not a stacked two-line button. A slot button only saves space over that if it stays
+     as compact as the thing it is a picker for. */
+  .kcslot { display: flex; align-items: baseline; gap: 5px; padding: 4px 9px; }
+  .kcslot b { font-size: 17px; }
+  /* DKS/MPT/MT/TGL/END: one key, N output slots plus a handful of numbers - laid out as
+     a wrapping row of slot buttons above a wrapping row of compact number fields, rather
+     than SOCD/RS's fixed two-column layout, since the slot count varies 1-4 by type. */
+  .hkslots { display: flex; gap: 6px; flex-wrap: wrap; }
+  .hknums { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .hknums .numfield { display: flex; align-items: center; gap: 5px; }
+  .hknums .numfield label { white-space: nowrap; }
+  .hknums input[type=number] { width: 68px; padding: 2px 6px; }
   .statusbar { flex: none; display: flex; align-items: center; gap: 12px; border-top: 2px solid var(--ink); background: var(--accent); padding: 3px 12px; }
   .statusbar p { margin: 0; }
   .statusbar .spacer { flex: 1; }
@@ -440,16 +462,15 @@
       <div class="tabpane" id="tab-rf" hidden><div class="pick" id="remapFns"></div></div>
     </div>
 
-    <!-- The vendor's Advanced Key page holds these seven, one binding per physical key.
-         SOCD and RS are wired up; the rest stay visible so where they will go is not a surprise. -->
+    <!-- The vendor's Advanced Key page holds these seven, one binding per physical key. -->
     <div class="view" id="view-adv" hidden>
       <div class="tabs">
         <button class="tab active" data-tab="socd">SOCD</button>
-        <button class="tab" data-tab="dks" disabled title="Dynamic keystroke - not supported yet">DKS</button>
-        <button class="tab" data-tab="mpt" disabled title="Multi-point trigger - not supported yet">MPT</button>
-        <button class="tab" data-tab="mt" disabled title="Tap / hold - not supported yet">MT</button>
-        <button class="tab" data-tab="tgl" disabled title="Toggle - not supported yet">TGL</button>
-        <button class="tab" data-tab="end" disabled title="Fire on release - not supported yet">END</button>
+        <button class="tab" data-tab="dks" title="Dynamic Key Stroke: up to 4 different keys, one per press depth">DKS</button>
+        <button class="tab" data-tab="mpt" title="Multi-Point Trigger: up to 3 different keys, one per press depth">MPT</button>
+        <button class="tab" data-tab="mt" title="Multi-Tap: one key on a tap, another on a long press">MT</button>
+        <button class="tab" data-tab="tgl" title="Toggle: press once to latch the key held, press again to release it">TGL</button>
+        <button class="tab" data-tab="end" title="End Trigger: fires as the key rebounds past a set point">END</button>
         <button class="tab" data-tab="rs" title="Rapid Snap: whichever of the two keys is pressed deeper wins">RS</button>
       </div>
       <div class="tabpane" id="tab-socd">
@@ -473,6 +494,98 @@
           <div class="socd-list">
             <p class="muted" id="socdListTitle">Saved pairs</p>
             <div id="socdList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpane" id="tab-dks" hidden>
+        <div class="socd">
+          <div class="socd-edit">
+            <p class="hint" id="dksHint">Connect the keyboard first.</p>
+            <div class="socd-row readout"><span><span class="muted">Key</span> <b id="dksKey">--</b></span></div>
+            <div class="hkslots" id="dksSlots"></div>
+            <div class="hknums" id="dksNums"></div>
+            <div class="socd-row">
+              <button id="dksBind" disabled>Bind</button>
+              <button id="dksDelete" disabled>Delete</button>
+            </div>
+          </div>
+          <div class="socd-list">
+            <p class="muted">Saved DKS keys</p>
+            <div id="dksList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpane" id="tab-mpt" hidden>
+        <div class="socd">
+          <div class="socd-edit">
+            <p class="hint" id="mptHint">Connect the keyboard first.</p>
+            <div class="socd-row readout"><span><span class="muted">Key</span> <b id="mptKey">--</b></span></div>
+            <div class="hkslots" id="mptSlots"></div>
+            <div class="hknums" id="mptNums"></div>
+            <div class="socd-row">
+              <button id="mptBind" disabled>Bind</button>
+              <button id="mptDelete" disabled>Delete</button>
+            </div>
+          </div>
+          <div class="socd-list">
+            <p class="muted">Saved MPT keys</p>
+            <div id="mptList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpane" id="tab-mt" hidden>
+        <div class="socd">
+          <div class="socd-edit">
+            <p class="hint" id="mtHint">Connect the keyboard first.</p>
+            <div class="socd-row readout"><span><span class="muted">Key</span> <b id="mtKey">--</b></span></div>
+            <div class="hkslots" id="mtSlots"></div>
+            <div class="hknums" id="mtNums"></div>
+            <div class="socd-row">
+              <button id="mtBind" disabled>Bind</button>
+              <button id="mtDelete" disabled>Delete</button>
+              <span class="hint" id="mtTry">Held now: nothing</span>
+            </div>
+          </div>
+          <div class="socd-list">
+            <p class="muted">Saved MT keys</p>
+            <div id="mtList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpane" id="tab-tgl" hidden>
+        <div class="socd">
+          <div class="socd-edit">
+            <p class="hint" id="tglHint">Connect the keyboard first.</p>
+            <div class="socd-row readout"><span><span class="muted">Key</span> <b id="tglKey">--</b></span></div>
+            <div class="hkslots" id="tglSlots"></div>
+            <div class="hknums" id="tglNums"></div>
+            <div class="socd-row">
+              <button id="tglBind" disabled>Bind</button>
+              <button id="tglDelete" disabled>Delete</button>
+              <span class="hint" id="tglTry">Held now: nothing</span>
+            </div>
+          </div>
+          <div class="socd-list">
+            <p class="muted">Saved TGL keys</p>
+            <div id="tglList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpane" id="tab-end" hidden>
+        <div class="socd">
+          <div class="socd-edit">
+            <p class="hint" id="endHint">Connect the keyboard first.</p>
+            <div class="socd-row readout"><span><span class="muted">Key</span> <b id="endKey">--</b></span></div>
+            <div class="hkslots" id="endSlots"></div>
+            <div class="hknums" id="endNums"></div>
+            <div class="socd-row">
+              <button id="endBind" disabled>Bind</button>
+              <button id="endDelete" disabled>Delete</button>
+            </div>
+          </div>
+          <div class="socd-list">
+            <p class="muted">Saved END keys</p>
+            <div id="endList"></div>
           </div>
         </div>
       </div>
@@ -529,6 +642,14 @@
   </aside>
 
   <div id="connectOverlay" hidden><p>Reading configuration</p></div>
+
+  <div id="kcOverlay" hidden>
+    <div class="panel">
+      <p class="hint" id="kcOverlayHint">Pick a key</p>
+      <div id="kcOverlayPicker"></div>
+      <button id="kcOverlayCancel">Cancel</button>
+    </div>
+  </div>
 
 </div>
 
@@ -696,11 +817,18 @@ async function toggleKey(row, col) {
   if (selected.has(rc)) { selected.delete(rc); updateSelectionUI(); return; }
   // SOCD/RS bind exactly two keys, in pick order (A, then B). A key that is already half of
   // a saved pair brings its partner along, so clicking either end opens that pair to edit.
+  // DKS/MPT/MT/TGL/END bind one key at a time instead, same as Remap below.
   if (!document.getElementById('view-adv').hidden) {
-    const saved = advTab() === 'rs' ? rsPairs().find(p => p.a === rc || p.b === rc)
-                                     : socdPairs().find(p => p.a === rc || p.b === rc);
-    if (saved) { (advTab() === 'rs' ? selectRsPair : selectSocdPair)(saved); return; }
-    if (selected.size >= 2) selected.clear();
+    if (ADV_PAIR_TABS.has(advTab())) {
+      const saved = advTab() === 'rs' ? rsPairs().find(p => p.a === rc || p.b === rc)
+                                       : socdPairs().find(p => p.a === rc || p.b === rc);
+      if (saved) { (advTab() === 'rs' ? selectRsPair : selectSocdPair)(saved); return; }
+      if (selected.size >= 2) selected.clear();
+      selected.add(rc);
+      updateSelectionUI();
+      return;
+    }
+    selected.clear();
     selected.add(rc);
     updateSelectionUI();
     return;
@@ -803,12 +931,11 @@ for (const t of document.querySelectorAll('#view-remap .tab')) {
   t.addEventListener('click', () => setRemapLayer(t.dataset.tab === 'rf' ? 1 : 0));
 }
 
-// Same reasoning: switching the SOCD/RS sub-tab can reveal a pane last rendered against
-// whatever was selected while the OTHER sub-tab was open - refresh both on every switch,
-// the same call the view-switcher itself makes when Advanced keys is opened fresh. Defined
-// for every tab in the strip, not just socd/rs, so a later type gets this for free too.
+// Same reasoning: switching the Advanced-keys sub-tab can reveal a pane last rendered
+// against whatever was selected while a DIFFERENT sub-tab was open - refresh every pane on
+// every switch, the same call the view-switcher itself makes when the view is opened fresh.
 for (const t of document.querySelectorAll('#view-adv .tab')) {
-  t.addEventListener('click', () => { renderSocd(); renderRs(); });
+  t.addEventListener('click', () => renderAllAdv());
 }
 
 
@@ -829,7 +956,12 @@ function updateSelectionUI() {
   updateEnabled();
   // Remapping follows the same key picker, so it has to redraw when the picking changes.
   if (!document.getElementById('view-remap').hidden) renderRemap();
-  if (!document.getElementById('view-adv').hidden) (advTab() === 'rs' ? renderRs : renderSocd)();
+  if (!document.getElementById('view-adv').hidden) {
+    const tab = advTab();
+    if (tab === 'rs') renderRs();
+    else if (tab === 'socd') renderSocd();
+    else if (HK_SINGLE_SPECS[tab]) renderHkSingle(tab, HK_SINGLE_SPECS[tab]);
+  }
 }
 
 // The gauge draws the key's real travel, read from the device (axisRangeMax).
@@ -918,8 +1050,7 @@ for (const btn of document.querySelectorAll('.navbtn')) {
       arm.textContent = 'Restore ' + (remapLayer ? 'FN layer' : 'base layer');
     }
     if (btn.dataset.view === 'adv') {
-      renderSocd();
-      renderRs();
+      renderAllAdv();
       if (device && !advCache) loadAdvancedKeys();
     }
     socdListen(btn.dataset.view === 'adv');
@@ -2337,7 +2468,7 @@ const KP_SHORT = { 41: 'Esc', 42: 'Bksp', 43: 'Tab', 44: '', 45: '-', 46: '=', 5
   229: 'Shift', 230: 'Alt', 231: 'Win' };
 const kpLabel = code => (KP_SHORT[code] !== undefined ? KP_SHORT[code] : hidName(code));
 
-function kpRows(rows, current, onPick, off, u) {
+function kpRows(rows, current, onPick, off, u, drag = true) {
   const box = document.createElement('div');
   box.className = 'kp-block';
   for (const row of rows) {
@@ -2358,7 +2489,10 @@ function kpRows(rows, current, onPick, off, u) {
       if (code === current) b.className = 'on';
       b.disabled = off;
       b.onclick = () => onPick(code);
-      makeDraggable(b, code);
+      // Dragging onto the board only means something for Remap - the overlay picker's
+      // buttons skip it, or dropping one on #kb would silently remap that key instead of
+      // filling the DKS/MPT/... slot the overlay was actually opened for.
+      if (drag) makeDraggable(b, code);
       line.appendChild(b);
     }
     box.appendChild(line);
@@ -2372,6 +2506,26 @@ function renderPicker(el, current, onPick, off) {
   el.innerHTML = '';
   el.append(kpRows(PICKER_MAIN, current, onPick, off, u), kpRows(PICKER_NAV, current, onPick, off, u));
 }
+
+// Compact keycode picker for DKS/MPT/MT/TGL/END, shown over everything else while one
+// slot is being chosen - Advanced keys has nowhere near Remap's free space for one of
+// these to sit on screen permanently, let alone one per slot.
+function closeKcPicker() {
+  document.getElementById('kcOverlay').hidden = true;
+}
+function openKcPicker(current, hint, onPick) {
+  document.getElementById('kcOverlayHint').textContent = hint;
+  const el = document.getElementById('kcOverlayPicker');
+  const h = 24, u = Math.round(h * 1.55);
+  el.style.setProperty('--kph', h + 'px');
+  el.innerHTML = '';
+  const choose = code => { closeKcPicker(); onPick(code); };
+  el.append(kpRows(PICKER_MAIN, current, choose, false, u, false), kpRows(PICKER_NAV, current, choose, false, u, false));
+  document.getElementById('kcOverlay').hidden = false;
+}
+document.getElementById('kcOverlayCancel').onclick = closeKcPicker;
+document.getElementById('kcOverlay').addEventListener('click', e => { if (e.target.id === 'kcOverlay') closeKcPicker(); });
+addEventListener('keydown', e => { if (e.key === 'Escape' && !document.getElementById('kcOverlay').hidden) closeKcPicker(); });
 
 // One key at a time on purpose. The performance tab writes the whole form to every
 // selected key, which is fine for a trigger depth and a disaster for a keymap.
@@ -2632,6 +2786,8 @@ const layoutIndex = new Map(KEY_LAYOUT.map(([rc], i) => [rc, i]));
 // Which Advanced-keys sub-tab is open, so the shared key picker can route a click to the
 // right feature's pair-picking logic.
 const advTab = () => document.querySelector('#view-adv .tab.active')?.dataset.tab;
+// SOCD and RS bind a pair of keys; DKS/MPT/MT/TGL/END bind one key each, like Remap.
+const ADV_PAIR_TABS = new Set(['socd', 'rs']);
 
 function socdPackets(a, b, kcA, kcB, delay, mode) {
   const [, , sA, sB] = SOCD_MODES[mode];
@@ -2663,6 +2819,19 @@ function parseHigherKey(t) {
   } else if (t[4] === HK_TYPE.RS) {
     hk.rs = { row2: t[5], col2: t[6], kcOwn: t[7] | t[8] << 8, kcPartner: t[9] | t[10] << 8,
               delay: t[11] | t[12] << 8 };
+  } else if (t[4] === HK_TYPE.TGL) {
+    hk.tgl = { kc: t[5] | t[6] << 8, time: t[7] | t[8] << 8 };
+  } else if (t[4] === HK_TYPE.MT) {
+    hk.mt = { kcs: [t[5] | t[6] << 8, t[7] | t[8] << 8], time: t[9] | t[10] << 8 };
+  } else if (t[4] === HK_TYPE.END) {
+    hk.end = { kcs: [t[5] | t[6] << 8, t[7] | t[8] << 8], delay: t[9] | t[10] << 8 };
+  } else if (t[4] === HK_TYPE.MPT) {
+    hk.mpt = { kcs: [t[5] | t[6] << 8, t[7] | t[8] << 8, t[9] | t[10] << 8],
+               dbs: [(t[11] | t[12] << 8) / 1000, (t[13] | t[14] << 8) / 1000, (t[15] | t[16] << 8) / 1000] };
+  } else if (t[4] === HK_TYPE.DKS) {
+    hk.dks = { kcs: [t[5] | t[6] << 8, t[7] | t[8] << 8, t[9] | t[10] << 8, t[11] | t[12] << 8],
+               trps: [t[13], t[14], t[15], t[16]],
+               dbs: [(t[17] | t[18] << 8) / 1000, (t[19] | t[20] << 8) / 1000] };
   }
   return hk;
 }
@@ -2718,7 +2887,7 @@ function invalidateAdvanced() {
   advLoading = false;
   advUnsupported = false;
   if (device && !document.getElementById('view-adv').hidden) loadAdvancedKeys();
-  else { renderSocd(); renderRs(); paintAdvTags(); }
+  else { renderAllAdv(); paintAdvTags(); }
 }
 
 async function loadAdvancedKeys() {
@@ -2726,8 +2895,7 @@ async function loadAdvancedKeys() {
   const gen = ++advGen;
   advLoading = true;
   advUnsupported = false;
-  renderSocd();
-  renderRs();
+  renderAllAdv();
   const map = new Map();
   for (const [rc] of KEY_LAYOUT) {
     if (gen !== advGen || !device) return;   // superseded by a config switch or a disconnect
@@ -2741,19 +2909,19 @@ async function loadAdvancedKeys() {
       advLoading = false;
       advUnsupported = true;
       log('Advanced keys: no answer to the first read - this firmware may not support them.');
-      renderSocd();
-      renderRs();
+      renderAllAdv();
       return;
     }
   }
   if (gen !== advGen) return;
   advCache = map;
   advLoading = false;
-  const other = [...map.values()].filter(hk => hk.type !== HK_TYPE.None && hk.type !== HK_TYPE.SOCD && hk.type !== HK_TYPE.RS).length;
-  log(`Advanced keys (${configLabel(currentConfig)}): ${socdPairs().length} SOCD pair(s), ${rsPairs().length} RS pair(s), ` +
-      `${other} other binding(s), ${KEY_LAYOUT.length - map.size} key(s) unread.`);
-  renderSocd();
-  renderRs();
+  // hkSingleBound() etc. all read advCache directly, so this is only reachable after the
+  // line above - every HigherKey type is accounted for here, so there is no "other" bucket.
+  const counts = [`${socdPairs().length} SOCD pair(s)`, `${rsPairs().length} RS pair(s)`,
+    ...Object.entries(HK_SINGLE_SPECS).map(([, spec]) => `${hkSingleBound(spec).length} ${spec.label} key(s)`)];
+  log(`Advanced keys (${configLabel(currentConfig)}): ${counts.join(', ')}, ${KEY_LAYOUT.length - map.size} key(s) unread.`);
+  renderAllAdv();
   paintAdvTags();
 }
 
@@ -3041,6 +3209,268 @@ async function deleteRs() {
 document.getElementById('rsBind').onclick = bindRs;
 document.getElementById('rsDelete').onclick = deleteRs;
 
+// DKS/MPT/MT/TGL/END: one physical key, 1-4 output slots plus a handful of type-specific
+// numbers - unlike SOCD/RS there is no partner key, so one bind/render/delete engine
+// below covers all five instead of five more near-copies of the SOCD/RS pattern. The wire
+// layout for each packet function is read straight from the vendor's own packet builder
+// (vu()'s "DKS"/"MPT"/"MT"/"TGL"/"END" cases in index.js) and reply parser
+// (higherKeyXXXData), the same way RS was - not guessed.
+function dksPacket(rc, kcs, nums) {
+  return [CATEGORY.HigherKey, HK_SUB.Write, ...rcOf(rc), HK_TYPE.DKS,
+          ...u16le16bit(kcs[0]), ...u16le16bit(kcs[1]), ...u16le16bit(kcs[2]), ...u16le16bit(kcs[3]),
+          nums[0], nums[1], nums[2], nums[3], ...u16le(nums[4]), ...u16le(nums[5])];
+}
+function mptPacket(rc, kcs, nums) {
+  return [CATEGORY.HigherKey, HK_SUB.Write, ...rcOf(rc), HK_TYPE.MPT,
+          ...u16le16bit(kcs[0]), ...u16le16bit(kcs[1]), ...u16le16bit(kcs[2]),
+          ...u16le(nums[0]), ...u16le(nums[1]), ...u16le(nums[2])];
+}
+function mtPacket(rc, kcs, nums) {
+  return [CATEGORY.HigherKey, HK_SUB.Write, ...rcOf(rc), HK_TYPE.MT,
+          ...u16le16bit(kcs[0]), ...u16le16bit(kcs[1]), ...u16le16bit(nums[0])];
+}
+function tglPacket(rc, kcs, nums) {
+  return [CATEGORY.HigherKey, HK_SUB.Write, ...rcOf(rc), HK_TYPE.TGL,
+          ...u16le16bit(kcs[0]), ...u16le16bit(nums[0])];
+}
+function endPacket(rc, kcs, nums) {
+  return [CATEGORY.HigherKey, HK_SUB.Write, ...rcOf(rc), HK_TYPE.END,
+          ...u16le16bit(kcs[0]), ...u16le16bit(kcs[1]), ...u16le16bit(nums[0])];
+}
+
+// ponytail: DKS's 4 "%" fields and END's "Delay" are read from the wire exactly as the
+// vendor sends them (DKS's trps are literally raw unscaled bytes, matching the vendor UI
+// copy's own "10%-90% rebound travel" framing for the sibling END feature) but neither has
+// been confirmed against a live depth reading the way Performance's trigger points were -
+// treat the units as a well-evidenced guess, not a verified fact, until tested on hardware.
+const HK_SINGLE_SPECS = {
+  dks: {
+    type: HK_TYPE.DKS, field: 'dks', label: 'DKS',
+    slots: ['Press', 'Bottom', 'Release', 'Lift'],
+    nums: [
+      { label: 'Press %', min: 0, max: 100, step: 1 },
+      { label: 'Bottom %', min: 0, max: 100, step: 1 },
+      { label: 'Release %', min: 0, max: 100, step: 1 },
+      { label: 'Lift %', min: 0, max: 100, step: 1 },
+      { label: 'Press dead-zone (mm)', min: 0, max: 4, step: 0.05 },
+      { label: 'Release dead-zone (mm)', min: 0, max: 4, step: 0.05 },
+    ],
+    defaultNums: [15, 85, 60, 10, 0.2, 0.2],
+    getCurrent: hk => ({ kcs: hk.dks.kcs, nums: [...hk.dks.trps, ...hk.dks.dbs] }),
+    packet: dksPacket,
+  },
+  mpt: {
+    type: HK_TYPE.MPT, field: 'mpt', label: 'MPT',
+    slots: ['Light', 'Medium', 'Heavy'],
+    nums: [
+      { label: 'Light depth (mm)', min: 0, max: 4, step: 0.05 },
+      { label: 'Medium depth (mm)', min: 0, max: 4, step: 0.05 },
+      { label: 'Heavy depth (mm)', min: 0, max: 4, step: 0.05 },
+    ],
+    defaultNums: [0.5, 1.5, 2.5],
+    getCurrent: hk => ({ kcs: hk.mpt.kcs, nums: hk.mpt.dbs }),
+    packet: mptPacket,
+  },
+  mt: {
+    type: HK_TYPE.MT, field: 'mt', label: 'MT',
+    slots: ['Tap', 'Hold'],
+    nums: [{ label: 'Hold threshold (ms)', min: 0, max: 1000, step: 10 }],
+    defaultNums: [200],
+    getCurrent: hk => ({ kcs: hk.mt.kcs, nums: [hk.mt.time] }),
+    packet: mtPacket,
+  },
+  tgl: {
+    type: HK_TYPE.TGL, field: 'tgl', label: 'TGL',
+    slots: ['Toggles'],
+    nums: [{ label: 'Repeat (ms)', min: 0, max: 1000, step: 10 }],
+    defaultNums: [0],
+    getCurrent: hk => ({ kcs: [hk.tgl.kc], nums: [hk.tgl.time] }),
+    packet: tglPacket,
+  },
+  end: {
+    type: HK_TYPE.END, field: 'end', label: 'END',
+    slots: ['Press', 'Release'],
+    nums: [{ label: 'Delay', min: 0, max: 100, step: 1 }],
+    defaultNums: [0],
+    getCurrent: hk => ({ kcs: hk.end.kcs, nums: [hk.end.delay] }),
+    packet: endPacket,
+  },
+};
+
+// Single-select, like Remap - these bind one physical key, not a pair.
+const hkSelection = () => (selected.size === 1 ? selected.values().next().value : null);
+
+// Which keys currently hold a binding of this type - the single-key equivalent of
+// socdPairs()/rsPairs(), without a pairing-up step since each key stands alone.
+function hkSingleBound(spec) {
+  if (!advCache) return [];
+  return [...advCache].filter(([, hk]) => hk.type === spec.type).map(([rc]) => rc);
+}
+
+function hkSingleConflict(rc, spec) {
+  const hk = advCache.get(rc);
+  if (!hk) return `${keyLabelOf(rc)} could not be read - reopen this view to retry.`;
+  if (hk.type === HK_TYPE.None || hk.type === spec.type) return '';
+  return `${keyLabelOf(rc)} already has a ${HK_NAMES[hk.type] || 'type ' + hk.type} binding - delete it first.`;
+}
+
+// One button per output slot, showing the key it currently sends; click opens the
+// compact overlay picker. Mutates kcs in place and repaints just its own label, since
+// nothing else on screen depends on which key a slot holds.
+function renderHkSlots(el, spec, kcs, disabled) {
+  el.innerHTML = '';
+  spec.slots.forEach((label, i) => {
+    const b = document.createElement('button');
+    b.className = 'kcslot';
+    b.innerHTML = `<span class="muted">${label}</span><b></b>`;
+    const out = b.querySelector('b');
+    out.textContent = kcs[i] ? keyName(kcs[i]) : '--';
+    b.disabled = disabled;
+    b.onclick = () => openKcPicker(kcs[i], `${spec.label} - ${label}`, code => { kcs[i] = code; out.textContent = keyName(code); });
+    el.appendChild(b);
+  });
+}
+
+function renderHkNums(el, spec, nums, disabled) {
+  el.innerHTML = '';
+  spec.nums.forEach((f, i) => {
+    const wrap = document.createElement('span');
+    wrap.className = 'numfield';
+    const id = `hknum_${spec.field}_${i}`;
+    wrap.innerHTML = `<label class="muted" for="${id}">${f.label}</label>`;
+    const input = document.createElement('input');
+    input.type = 'number'; input.id = id;
+    input.min = f.min; input.max = f.max; input.step = f.step;
+    input.value = nums[i];
+    input.disabled = disabled;
+    input.onchange = () => { nums[i] = Math.max(f.min, Math.min(f.max, Number(input.value) || 0)); input.value = nums[i]; };
+    wrap.appendChild(input);
+    el.appendChild(wrap);
+  });
+}
+
+// Live-edited kcs/nums for whichever single-key tab is open and has a key picked -
+// rebuilt fresh whenever the picked key or the tab changes, edited in place by the slot
+// picker / number fields afterwards, read by bindHkSingle() on Bind.
+let hkEdit = null;   // { prefix, rc, kcs, nums } | null
+
+function renderHkSingle(prefix, spec) {
+  const rc = hkSelection();
+  const ready = !!(device && advCache);
+  const hk = ready && rc ? advCache.get(rc) : null;
+  const conflict = hk ? hkSingleConflict(rc, spec) : '';
+  const bound = !!(hk && hk.type === spec.type);
+
+  if (!rc || !hkEdit || hkEdit.prefix !== prefix || hkEdit.rc !== rc) {
+    const seed = bound ? spec.getCurrent(hk) : { kcs: spec.slots.map(() => 0), nums: spec.defaultNums.slice() };
+    hkEdit = rc ? { prefix, rc, kcs: seed.kcs.slice(), nums: seed.nums.slice() } : null;
+  }
+
+  document.getElementById(`${prefix}Hint`).textContent =
+    !device ? 'Connect the keyboard first.' :
+    advUnsupported ? 'This firmware does not answer advanced-key reads.' :
+    advLoading || !advCache ? 'Reading advanced keys...' :
+    !rc ? (selected.size > 1 ? `Pick exactly one key - ${spec.label} is per key.` : 'Pick a key on the board.') :
+    conflict || (bound ? 'Editing a saved binding - change it and Update, or Delete it.' : 'Fill in the slots below, then Bind.');
+  document.getElementById(`${prefix}Key`).textContent = rc ? keyLabelOf(rc) : '--';
+
+  const canEdit = !!(ready && rc && !conflict);
+  const slotsEl = document.getElementById(`${prefix}Slots`), numsEl = document.getElementById(`${prefix}Nums`);
+  if (hkEdit) {
+    renderHkSlots(slotsEl, spec, hkEdit.kcs, !canEdit);
+    renderHkNums(numsEl, spec, hkEdit.nums, !canEdit);
+  } else {
+    slotsEl.innerHTML = ''; numsEl.innerHTML = '';
+  }
+  const bind = document.getElementById(`${prefix}Bind`);
+  bind.textContent = bound ? 'Update' : 'Bind';
+  bind.disabled = !canEdit;
+  document.getElementById(`${prefix}Delete`).disabled = !(ready && bound);
+
+  const list = document.getElementById(`${prefix}List`);
+  list.innerHTML = '';
+  if (!ready) return;
+  const keys = hkSingleBound(spec);
+  if (!keys.length) { list.innerHTML = `<p class="hint">No ${spec.label} keys on this config.</p>`; return; }
+  for (const krc of keys) {
+    const b = document.createElement('button');
+    const cur = spec.getCurrent(advCache.get(krc));
+    b.textContent = `${keyLabelOf(krc)} -> ${cur.kcs.map(c => c ? keyName(c) : '?').join(' / ')}`;
+    if (rc === krc) b.className = 'on';
+    b.onclick = () => setSelection([krc]);
+    list.appendChild(b);
+  }
+}
+
+async function bindHkSingle(prefix, spec) {
+  if (!hkEdit || hkEdit.prefix !== prefix) return;
+  const { rc, kcs, nums } = hkEdit;
+  if (!device || !advCache || !rc) return;
+  const conflict = hkSingleConflict(rc, spec);
+  if (conflict) { log(`${spec.label}: ${conflict}`); saveState(`${spec.label} refused`, true); return; }
+  if (kcs.some(c => !c)) {
+    log(`${spec.label}: every slot needs a key - nothing written.`);
+    saveState(`${spec.label} refused`, true);
+    return;
+  }
+  saveState('Saving...', true);
+  const pkt = spec.packet(rc, kcs, nums);
+  if (!await sendAndWait(pkt, 500)) {
+    log(`${spec.label}: no answer to the write.`);
+    saveState(`${spec.label} failed`, true);
+    await rereadKeys([rc]);
+    renderHkSingle(prefix, spec);
+    paintAdvTags();
+    return;
+  }
+  // The echo only proves the packet arrived - read the key back and compare field by field.
+  const [after] = await rereadKeys([rc]);
+  const got = after && after.type === spec.type ? spec.getCurrent(after) : null;
+  const ok = !!got && JSON.stringify(got.kcs) === JSON.stringify(kcs) && JSON.stringify(got.nums) === JSON.stringify(nums);
+  const what = `${keyLabelOf(rc)} -> ${kcs.map(keyName).join(' / ')}`;
+  if (ok) {
+    log(`${spec.label} bound: ${what}`);
+    saveState(`${spec.label} bound`);
+  } else {
+    log(`${spec.label} REJECTED (${what}) - keyboard holds ${JSON.stringify(after)}`);
+    saveState(`${spec.label} refused`, true);
+  }
+  renderHkSingle(prefix, spec);
+  paintAdvTags();
+}
+
+async function deleteHkSingle(prefix, spec) {
+  const rc = hkSelection();
+  if (!device || !advCache || !rc) return;
+  const hk = advCache.get(rc);
+  if (!hk || hk.type !== spec.type) return;
+  const was = spec.getCurrent(hk);
+  saveState('Saving...', true);
+  await sendAndWait(hkClearPacket(rc), 500);
+  const [after] = await rereadKeys([rc]);
+  const ok = !!(after && after.type === HK_TYPE.None);
+  const what = `${keyLabelOf(rc)} (was -> ${was.kcs.map(c => c ? keyName(c) : '?').join(' / ')})`;
+  log(ok ? `${spec.label} deleted: ${what}` : `${spec.label} delete REJECTED: ${what} - keyboard holds ${JSON.stringify(after)}`);
+  saveState(ok ? `${spec.label} deleted` : 'Delete refused', !ok);
+  hkEdit = null;
+  renderHkSingle(prefix, spec);
+  paintAdvTags();
+}
+
+for (const [prefix, spec] of Object.entries(HK_SINGLE_SPECS)) {
+  document.getElementById(`${prefix}Bind`).onclick = () => bindHkSingle(prefix, spec);
+  document.getElementById(`${prefix}Delete`).onclick = () => deleteHkSingle(prefix, spec);
+}
+
+// One place naming every Advanced-keys renderer, so the several spots that used to call
+// renderSocd()+renderRs() by hand (opening the view, a config switch, a disconnect, a
+// sub-tab click) stay in sync now that there are seven instead of two.
+function renderAllAdv() {
+  renderSocd();
+  renderRs();
+  for (const [prefix, spec] of Object.entries(HK_SINGLE_SPECS)) renderHkSingle(prefix, spec);
+}
+
 // S1, S2... on both keys of each pair, and the feature name on keys bound to something else.
 function paintAdvTags() {
   const on = !document.getElementById('view-adv').hidden;
@@ -3062,7 +3492,7 @@ function paintAdvTags() {
     for (const [rc, hk] of advCache) {
       if (hk.type !== HK_TYPE.None && hk.type !== HK_TYPE.SOCD && hk.type !== HK_TYPE.RS) {
         const name = HK_NAMES[hk.type] || '?';
-        tags.set(rc, [name, name + ' binding (not editable here yet)']);
+        tags.set(rc, [name, name + ' binding - open its tab in Advanced keys to edit']);
       }
     }
   }
@@ -3175,6 +3605,33 @@ if (location.search.includes('selftest')) {
                  'a written RS packet parses back');
   console.assert(parseHigherKey(rsA).socd === undefined, 'an RS packet does not also parse as SOCD');
   console.assert(parseHigherKey([6, 1, 2, 5, 0]).rs === undefined, 'an unbound key carries no RS data');
+  // The five single-key types: one packet each (no partner), read straight from the
+  // vendor's own vu()/higherKeyXXXData source rather than reverse-engineered from bytes.
+  const tglPkt = tglPacket('3-1', [4], [200]);
+  console.assert(eq(tglPkt, [6, 2, 3, 1, 4, 4, 0, 200, 0]), 'TGL packet');
+  console.assert(eq(parseHigherKey(tglPkt).tgl, { kc: 4, time: 200 }), 'a written TGL packet parses back');
+  const mtPkt = mtPacket('3-1', [4, 7], [300]);
+  console.assert(eq(mtPkt, [6, 2, 3, 1, 3, 4, 0, 7, 0, 44, 1]), 'MT packet (time is LE16, unscaled)');
+  console.assert(eq(parseHigherKey(mtPkt).mt, { kcs: [4, 7], time: 300 }), 'a written MT packet parses back');
+  const endPkt = endPacket('3-1', [4, 7], [50]);
+  console.assert(eq(endPkt, [6, 2, 3, 1, 5, 4, 0, 7, 0, 50, 0]), 'END packet');
+  console.assert(eq(parseHigherKey(endPkt).end, { kcs: [4, 7], delay: 50 }), 'a written END packet parses back');
+  const mptPkt = mptPacket('3-1', [4, 7, 9], [0.5, 1.5, 2.5]);
+  console.assert(eq(mptPkt, [6, 2, 3, 1, 2, 4, 0, 7, 0, 9, 0, 244, 1, 220, 5, 196, 9]),
+                 'MPT packet (depths are LE16 x1000, like Performance fields)');
+  console.assert(eq(parseHigherKey(mptPkt).mpt, { kcs: [4, 7, 9], dbs: [0.5, 1.5, 2.5] }), 'a written MPT packet parses back');
+  const dksPkt = dksPacket('3-1', [4, 7, 9, 11], [15, 85, 60, 10, 0.2, 0.2]);
+  console.assert(eq(dksPkt, [6, 2, 3, 1, 1, 4, 0, 7, 0, 9, 0, 11, 0, 15, 85, 60, 10, 200, 0, 200, 0]),
+                 'DKS packet (trigger points are raw bytes, dead-zones are LE16 x1000)');
+  console.assert(eq(parseHigherKey(dksPkt).dks, { kcs: [4, 7, 9, 11], trps: [15, 85, 60, 10], dbs: [0.2, 0.2] }),
+                 'a written DKS packet parses back');
+  // hkSingleConflict: a key already bound to a DIFFERENT type is refused; None or its own
+  // type is not (re-binding/updating your own key must not look like a conflict).
+  advCache = new Map([['3-1', { type: HK_TYPE.DKS, dks: {} }], ['3-2', { type: HK_TYPE.None }]]);
+  console.assert(hkSingleConflict('3-1', HK_SINGLE_SPECS.mpt) !== '', 'a key already bound to another type is refused');
+  console.assert(hkSingleConflict('3-1', HK_SINGLE_SPECS.dks) === '', 're-editing the same type is not a conflict');
+  console.assert(hkSingleConflict('3-2', HK_SINGLE_SPECS.tgl) === '', 'an unbound key has no conflict');
+  advCache = null;
   // The RT chip and the S1/S2 chip share one corner of the keycap. A key that is both
   // Rapid Trigger and part of a SOCD pair must show the SOCD chip - regression check for a
   // CSS specificity bug where the RT-hides-tag rule outranked the advtag-shows-tag rule.
@@ -3201,8 +3658,7 @@ setRtMode(0);
 renderLighting();
 renderRates();
 renderRemap();
-renderSocd();
-renderRs();
+renderAllAdv();
 </script>
 </body>
 </html>
