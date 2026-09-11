@@ -71,10 +71,10 @@
   #configSelect { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--accent); color: var(--ink); font-family: var(--term); font-size: 17px; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
   #configSelect:disabled { background: var(--surface); cursor: not-allowed; }
   .navbtn { width: 100%; text-align: left; }
-  /* These three all answer the same question - where does the key trigger, and does it
-     really trigger there. The rest are unrelated, so they just sit below a rule. */
+  /* Every entry sits under a heading naming what it is about, so the list can grow a view
+     without turning into one long column to scan top to bottom. */
   .navgroup { font-size: 15px; color: var(--ink); opacity: .75; letter-spacing: .09em; }
-  .navsep { border-top: 2px solid var(--ink); margin: 3px 0 0; }
+  .navgroup:not(:first-of-type) { margin-top: 6px; }
   .navbtn.active { background: var(--ink); color: var(--accent); }
   .navbtn.active:hover { background: var(--ink); }
 
@@ -143,6 +143,10 @@
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
   #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 12px; line-height: 1.15; background: var(--ink); color: var(--accent); }
   #kb .kb-key.rt .tag { display: block; }
+  /* Advanced keys: the chip names the binding (S1, S2... for SOCD pairs) instead, so the
+     RT chip steps aside there rather than two meanings sharing one corner. */
+  #kb.adv .kb-key.rt .tag { display: none; }
+  #kb .kb-key.advtag .tag { display: block; }
   /* Live travel fill, driven by the Travel test poll. Rises from the bottom of the cap. */
   #kb .kb-key .lvl { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--desk); }
   #kb .kb-key .cap { position: relative; }
@@ -215,6 +219,18 @@
      than the settings one, which has room to spare. */
   #view-remap .tabs { margin-bottom: 6px; }
   .kp { display: flex; gap: 9px; align-items: flex-start; }
+  /* Seven feature tabs have to fit one row of the centre column; 150px each would not. */
+  #view-adv .tab { min-width: 0; padding: 5px 18px; }
+  .socd { display: flex; gap: 24px; align-items: flex-start; }
+  .socd-edit { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+  .socd-edit .hint { margin: 0; }
+  .socd-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .socd-row input[type=number] { width: 64px; padding: 3px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; text-align: right; }
+  .socd-list { flex: 0 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  #socdList { display: flex; flex-direction: column; gap: 4px; }
+  #socdList button { text-align: left; padding: 4px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); }
+  #socdList button.on, #socdList button.on:hover { background: var(--ink); color: var(--accent); }
+  .socd-list .hint, .socd-list .warn { margin: 0; }
   .kp-block { display: flex; flex-direction: column; gap: 2px; }
   .kp-row { display: flex; gap: 2px; }
   .kp-row button { height: var(--kph, 17px); min-width: 0; padding: 0; line-height: 1;
@@ -295,12 +311,13 @@
     <button class="navbtn" data-view="performance">Settings</button>
     <button class="navbtn" data-view="traveltest">Travel test</button>
     <button class="navbtn" data-view="calibration">Calibration</button>
-    <div class="navsep"></div>
+    <span class="navgroup">KEYS</span>
     <button class="navbtn" data-view="remap">Remap keys</button>
-    <div class="navsep"></div>
-    <button class="navbtn" data-view="log">Log</button>
-    <button class="navbtn" data-view="rate">Polling rate</button>
+    <button class="navbtn" data-view="adv">Advanced keys</button>
+    <span class="navgroup">DEVICE</span>
     <button class="navbtn" data-view="light">Lighting</button>
+    <button class="navbtn" data-view="rate">Polling rate</button>
+    <button class="navbtn" data-view="log">Log</button>
   </nav>
 
   <div class="center">
@@ -418,6 +435,43 @@
       <div class="tabpane" id="tab-rf" hidden><div class="pick" id="remapFns"></div></div>
     </div>
 
+    <!-- The vendor's Advanced Key page holds these seven, one binding per physical key.
+         Only SOCD is wired up; the rest stay visible so where they will go is not a surprise. -->
+    <div class="view" id="view-adv" hidden>
+      <div class="tabs">
+        <button class="tab active" data-tab="socd">SOCD</button>
+        <button class="tab" data-tab="dks" disabled title="Dynamic keystroke - not supported yet">DKS</button>
+        <button class="tab" data-tab="mpt" disabled title="Multi-point trigger - not supported yet">MPT</button>
+        <button class="tab" data-tab="mt" disabled title="Tap / hold - not supported yet">MT</button>
+        <button class="tab" data-tab="tgl" disabled title="Toggle - not supported yet">TGL</button>
+        <button class="tab" data-tab="end" disabled title="Fire on release - not supported yet">END</button>
+        <button class="tab" data-tab="rs" disabled title="Deeper press wins - not supported yet">RS</button>
+      </div>
+      <div class="tabpane" id="tab-socd">
+        <div class="socd">
+          <div class="socd-edit">
+            <p class="hint" id="socdHint">Connect the keyboard first.</p>
+            <div class="socd-row readout">
+              <span><span class="muted">Key A</span> <b id="socdKeyA">--</b></span>
+              <span><span class="muted">Key B</span> <b id="socdKeyB">--</b></span>
+              <label class="muted" for="socdDelay">Delay (ms)</label>
+              <input id="socdDelay" type="number" min="0" max="100" step="1" value="0">
+            </div>
+            <div class="pick" id="socdMode"></div>
+            <div class="socd-row">
+              <button id="socdBind" disabled>Bind pair</button>
+              <button id="socdDelete" disabled>Delete pair</button>
+              <span class="hint" id="socdTry">Held now: nothing</span>
+            </div>
+          </div>
+          <div class="socd-list">
+            <div id="socdList"></div>
+            <p class="warn">CS2 and other competitive games ban SOCD handling - using it there can get an account suspended.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="view" id="view-light" hidden>
       <div class="lightrow">
         <button id="lightToggle" class="toggle" aria-pressed="false">
@@ -457,7 +511,11 @@
 
 <script>
 // Protocol reverse-engineered from https://www.xsyd.top/ (own device, WebHID).
-const CATEGORY = { Device: 1, Global: 2, Key: 3, Performance: 4, Lighting: 5, Macro: 7 };
+const CATEGORY = { Device: 1, Global: 2, Key: 3, Performance: 4, Lighting: 5, HigherKey: 6, Macro: 7 };
+// Advanced keys. Read [6,1,row,col], write [6,2,row,col,type,...payload]: one binding per
+// physical key, and the type byte says which feature it is (0 clears the key).
+const HK_SUB = { Read: 1, Write: 2 };
+const HK_TYPE = { None: 0, DKS: 1, MPT: 2, MT: 3, TGL: 4, END: 5, SOCD: 6, RS: 7 };
 const DEV_SUB = { Protocol: 1, Info: 2, Feature: 3 };
 // Key remapping. A row answers with 21 u16LE keycodes - the same 21-column grid the LED
 // mirror walks - so reading the whole board is 6 packets, not 64.
@@ -608,6 +666,16 @@ function renderKeyboard() {
 async function toggleKey(row, col) {
   const rc = `${row}-${col}`;
   if (selected.has(rc)) { selected.delete(rc); updateSelectionUI(); return; }
+  // SOCD binds exactly two keys, in pick order (A, then B). A key that is already half of
+  // a saved pair brings its partner along, so clicking either end opens that pair to edit.
+  if (!document.getElementById('view-adv').hidden) {
+    const saved = socdPairs().find(p => p.a === rc || p.b === rc);
+    if (saved) { selectSocdPair(saved); return; }
+    if (selected.size >= 2) selected.clear();
+    selected.add(rc);
+    updateSelectionUI();
+    return;
+  }
   // Remapping is one key at a time, so picking a second one there replaces the first
   // rather than building a selection that can only produce "pick exactly one". Travel
   // test is the same: its stats (tt) track a single watched key, so a second pick swaps
@@ -722,6 +790,7 @@ function updateSelectionUI() {
   updateEnabled();
   // Remapping follows the same key picker, so it has to redraw when the picking changes.
   if (!document.getElementById('view-remap').hidden) renderRemap();
+  if (!document.getElementById('view-adv').hidden) renderSocd();
 }
 
 // The gauge draws the key's real travel, read from the device (axisRangeMax).
@@ -809,8 +878,15 @@ for (const btn of document.querySelectorAll('.navbtn')) {
       arm.dataset.armed = '0';
       arm.textContent = 'Restore ' + (remapLayer ? 'FN layer' : 'base layer');
     }
+    if (btn.dataset.view === 'adv') {
+      renderSocd();
+      if (device && !advCache) loadAdvancedKeys();
+    }
+    socdListen(btn.dataset.view === 'adv');
     // Every view, not just the others: entering remap on the FN tab has to repaint too.
     paintCaps();
+    // Same rule for the advanced-key chips: drawn from the view on screen, never left over.
+    paintAdvTags();
     // saveState(msg, true) never times out, so a refusal from one view would sit in the
     // status bar of every other one. Leaving the view is as good as acknowledging it.
     saveState('');
@@ -1100,6 +1176,7 @@ function resetDevice(msg) {
   lightStates = {}; stripLeds = 0; ledPreview(false);
   codeLabel.clear();
   for (const k of Object.keys(layerCache)) delete layerCache[k];
+  invalidateAdvanced();
   paintCaps();
   renderConfigPicker();
   renderLighting();
@@ -1182,6 +1259,7 @@ async function switchConfig(id) {
   // both the form and every keycap tag rather than showing the old config's numbers.
   await fillFormFrom(selected.values().next().value);
   await loadAllModes();
+  invalidateAdvanced(); // advanced bindings belong to a config too
   saveState(`Switched to ${configLabel(currentConfig)}`);
 }
 
@@ -1199,6 +1277,7 @@ async function onConfigChangedExternally(id) {
   renderConfigPicker();
   await fillFormFrom(selected.values().next().value);
   await loadAllModes();
+  invalidateAdvanced();
 }
 
 // Backstop for the push onInputReport listens for below. The vendor's own bundle already
@@ -2492,6 +2571,323 @@ document.getElementById('remapDefaults').onclick = async (e) => {
   renderRemap();
 };
 
+// ---- Advanced keys: SOCD ----------------------------------------------------------
+// SOCD lives on BOTH keys of a pair: each key's packet names its partner, what each key
+// sends, the delay, and a mode byte. The two "always wins" modes put different bytes on
+// the two ends (1 on the winner, 2 on the other), which is how it reads as a priority.
+// [label, the vendor's name, mode byte on key A, mode byte on key B]
+const SOCD_MODES = [
+  ['Last input wins', 'Last Override', 0, 0],
+  ['A always wins', 'A Priority', 1, 2],
+  ['B always wins', 'B Priority', 2, 1],
+  ['Neutral', 'Neutralize', 3, 3],
+];
+// ponytail: unit and range unconfirmed (the vendor calls it "Delay" and edits it in a time
+// dialog); capped here and checked by read-back rather than trusted.
+const SOCD_DELAY_MAX = 100;
+const HK_NAMES = ['None', 'DKS', 'MPT', 'MT', 'TGL', 'END', 'SOCD', 'RS'];
+const rcOf = rc => rc.split('-').map(Number);
+const keyLabelOf = rc => KEY_LABEL.get(rc) || rc;
+const layoutIndex = new Map(KEY_LAYOUT.map(([rc], i) => [rc, i]));
+
+function socdPackets(a, b, kcA, kcB, delay, mode) {
+  const [, , sA, sB] = SOCD_MODES[mode];
+  const head = ([r, c]) => [CATEGORY.HigherKey, HK_SUB.Write, r, c, HK_TYPE.SOCD];
+  return [
+    [...head(a), b[0], b[1], ...u16le16bit(kcA), ...u16le16bit(kcB), ...u16le16bit(delay), sA],
+    [...head(b), a[0], a[1], ...u16le16bit(kcB), ...u16le16bit(kcA), ...u16le16bit(delay), sB],
+  ];
+}
+
+const hkClearPacket = rc => [CATEGORY.HigherKey, HK_SUB.Write, ...rcOf(rc), HK_TYPE.None];
+
+// A reply and a write share one layout, so this reads either.
+function parseHigherKey(t) {
+  const hk = { row: t[2], col: t[3], type: t[4] };
+  if (t[4] === HK_TYPE.SOCD) {
+    hk.socd = { row2: t[5], col2: t[6], kcOwn: t[7] | t[8] << 8, kcPartner: t[9] | t[10] << 8,
+                delay: t[11] | t[12] << 8, sByte: t[13] };
+  }
+  return hk;
+}
+
+// Mode from the byte on whichever key is being called A. 1/2 and 2/1 are the same binding
+// seen from either end, so a pair reads back correctly whichever key it is listed from.
+const socdModeOf = sByteA => SOCD_MODES.findIndex(m => m[2] === sByteA);
+
+// "A always wins" is ambiguous the moment the pair is listed in a different order than it
+// was picked, so name the actual key.
+function socdModeLabel(mode, pair) {
+  if (!pair || (mode !== 1 && mode !== 2)) return SOCD_MODES[mode] ? SOCD_MODES[mode][0] : 'unknown mode';
+  return keyLabelOf(pair[mode - 1]) + ' always wins';
+}
+
+let advCache = null;      // rc -> parseHigherKey(), for the active config; null = not read yet
+let advGen = 0;           // bumped whenever advCache goes stale, so a scan in flight discards itself
+let advLoading = false;
+let advUnsupported = false;
+let socdMode = 0;
+
+// Each pair is stored on both keys; list it once, from the end that comes first on the board.
+function socdPairs() {
+  const pairs = [];
+  if (!advCache) return pairs;
+  for (const [rc, hk] of advCache) {
+    if (!hk.socd) continue;
+    const partner = `${hk.socd.row2}-${hk.socd.col2}`;
+    if (advCache.get(partner)?.socd && layoutIndex.get(rc) > layoutIndex.get(partner)) continue;
+    pairs.push({ a: rc, b: partner, mode: socdModeOf(hk.socd.sByte), delay: hk.socd.delay });
+  }
+  return pairs;
+}
+
+// Binding state belongs to whatever config is active, so a config switch or a disconnect
+// makes all of it stale at once.
+function invalidateAdvanced() {
+  advCache = null;
+  advGen++;
+  advLoading = false;
+  advUnsupported = false;
+  if (device && !document.getElementById('view-adv').hidden) loadAdvancedKeys();
+  else { renderSocd(); paintAdvTags(); }
+}
+
+async function loadAdvancedKeys() {
+  if (!device) return;
+  const gen = ++advGen;
+  advLoading = true;
+  advUnsupported = false;
+  renderSocd();
+  const map = new Map();
+  for (const [rc] of KEY_LAYOUT) {
+    if (gen !== advGen || !device) return;   // superseded by a config switch or a disconnect
+    const [r, c] = rcOf(rc);
+    // Quiet: 64 identical-looking lines in the log say nothing the one summary below doesn't.
+    const res = await sendAndWait([CATEGORY.HigherKey, HK_SUB.Read, r, c, 0], 300, true);
+    if (res) { map.set(rc, parseHigherKey(res)); continue; }
+    // No answer to the very first key means no answer to any of them - stop rather than
+    // sitting out 63 more timeouts.
+    if (!map.size) {
+      advLoading = false;
+      advUnsupported = true;
+      log('Advanced keys: no answer to the first read - this firmware may not support them.');
+      renderSocd();
+      return;
+    }
+  }
+  if (gen !== advGen) return;
+  advCache = map;
+  advLoading = false;
+  const other = [...map.values()].filter(hk => hk.type !== HK_TYPE.None && hk.type !== HK_TYPE.SOCD).length;
+  log(`Advanced keys (${configLabel(currentConfig)}): ${socdPairs().length} SOCD pair(s), ${other} other binding(s), ` +
+      `${KEY_LAYOUT.length - map.size} key(s) unread.`);
+  renderSocd();
+  paintAdvTags();
+}
+
+const socdSelection = () => (selected.size === 2 ? [...selected] : null);
+
+// One advanced feature per key (the vendor refuses the same way), so a key already bound to
+// something else - or to a SOCD pair with a different partner - is not silently taken over.
+function socdConflict([a, b]) {
+  for (const [rc, other] of [[a, b], [b, a]]) {
+    const hk = advCache.get(rc);
+    if (!hk) return `${keyLabelOf(rc)} could not be read - reopen this view to retry.`;
+    if (hk.type === HK_TYPE.None) continue;
+    if (hk.socd) {
+      const partner = `${hk.socd.row2}-${hk.socd.col2}`;
+      if (partner === other) continue;
+      return `${keyLabelOf(rc)} is already paired with ${keyLabelOf(partner)} - delete that pair first.`;
+    }
+    return `${keyLabelOf(rc)} already has a ${HK_NAMES[hk.type] || 'type ' + hk.type} binding, which cannot be edited here yet.`;
+  }
+  return '';
+}
+
+function selectSocdPair(p) {
+  socdMode = p.mode >= 0 ? p.mode : 0;
+  document.getElementById('socdDelay').value = p.delay;
+  setSelection([p.a, p.b]);
+}
+
+function renderSocd() {
+  const pair = socdSelection();
+  const ready = !!(device && advCache);
+  const conflict = ready && pair ? socdConflict(pair) : '';
+  const saved = ready && pair ? socdPairs().find(p => (p.a === pair[0] && p.b === pair[1]) || (p.a === pair[1] && p.b === pair[0])) : null;
+  const canEdit = !!(ready && pair && !conflict);
+
+  document.getElementById('socdHint').textContent =
+    !device ? 'Connect the keyboard first.' :
+    advUnsupported ? 'This firmware does not answer advanced-key reads.' :
+    advLoading || !advCache ? 'Reading advanced keys...' :
+    !pair ? (selected.size > 2 ? 'Pick exactly two keys - SOCD is a pair.'
+                               : 'Pick two opposite keys on the board (A and D, W and S), then a mode.') :
+    conflict || (saved ? 'Editing a saved pair - change it and Update, or Delete it.' : 'Pick a mode, then Bind.');
+  document.getElementById('socdKeyA').textContent = pair ? keyLabelOf(pair[0]) : '--';
+  document.getElementById('socdKeyB').textContent = pair ? keyLabelOf(pair[1]) : '--';
+  const modes = document.getElementById('socdMode');
+  pickRow(modes, SOCD_MODES.length, socdMode, i => socdModeLabel(i, pair), i => { socdMode = i; renderSocd(); }, !canEdit);
+  [...modes.children].forEach((b, i) => { b.title = 'Vendor name: ' + SOCD_MODES[i][1]; });
+  document.getElementById('socdDelay').disabled = !canEdit;
+  const bind = document.getElementById('socdBind');
+  bind.textContent = saved ? 'Update pair' : 'Bind pair';
+  bind.disabled = !canEdit;
+  document.getElementById('socdDelete').disabled = !(ready && saved);
+
+  const list = document.getElementById('socdList');
+  list.innerHTML = '';
+  if (!ready) return;
+  const pairs = socdPairs();
+  if (!pairs.length) {
+    list.innerHTML = '<p class="hint">No SOCD pairs on this config.</p>';
+    return;
+  }
+  for (const p of pairs) {
+    const b = document.createElement('button');
+    b.textContent = `${keyLabelOf(p.a)} + ${keyLabelOf(p.b)} · ${socdModeLabel(p.mode, [p.a, p.b])} · ${p.delay} ms`;
+    if (saved === p) b.className = 'on';
+    b.onclick = () => selectSocdPair(p);
+    list.appendChild(b);
+  }
+}
+
+// Read back what the keyboard now holds for these keys, and keep the cache honest with it.
+async function rereadKeys(rcs) {
+  const out = [];
+  for (const rc of rcs) {
+    const res = await sendAndWait([CATEGORY.HigherKey, HK_SUB.Read, ...rcOf(rc), 0], 500);
+    const hk = res ? parseHigherKey(res) : null;
+    if (hk && advCache) advCache.set(rc, hk);
+    out.push(hk);
+  }
+  return out;
+}
+
+async function bindSocd() {
+  const pair = socdSelection();
+  if (!device || !advCache || !pair) return;
+  const conflict = socdConflict(pair);
+  if (conflict) { log('SOCD: ' + conflict); saveState('SOCD refused', true); return; }
+  // What each key sends is taken from the keymap as it is now, remaps included.
+  // ponytail: captured at bind time - remapping one of these keys later does not follow
+  // into the pair; bind it again after a remap.
+  if (!layerCur(0)) { if (await loadKeymap(0)) await refreshKeymap(0); }
+  const cur = layerCur(0);
+  const [a, b] = pair.map(rcOf);
+  const kcA = cur?.[a[0]]?.[a[1]], kcB = cur?.[b[0]]?.[b[1]];
+  if (!kcA || !kcB) {
+    log(`SOCD: could not tell what ${keyLabelOf(pair[kcA ? 1 : 0])} sends (unread or silenced) - nothing written.`);
+    saveState('SOCD refused', true);
+    return;
+  }
+  const delay = Math.max(0, Math.min(SOCD_DELAY_MAX, Math.round(Number(document.getElementById('socdDelay').value) || 0)));
+  const [, , sA, sB] = SOCD_MODES[socdMode];
+  saveState('Saving...', true);
+  for (const p of socdPackets(a, b, kcA, kcB, delay, socdMode)) {
+    if (!await sendAndWait(p, 500)) {
+      log('SOCD: no answer to the write.');
+      saveState('SOCD failed', true);
+      await rereadKeys(pair);
+      renderSocd();
+      paintAdvTags();
+      return;
+    }
+  }
+  // The echo only proves the packet arrived - read both keys back and compare field by field.
+  const after = await rereadKeys(pair);
+  const want = [[b, kcA, kcB, sA], [a, kcB, kcA, sB]];
+  const ok = after.every((hk, i) => {
+    const s = hk?.socd, [p, own, partner, sb] = want[i];
+    return !!s && s.row2 === p[0] && s.col2 === p[1] && s.kcOwn === own && s.kcPartner === partner &&
+           s.delay === delay && s.sByte === sb;
+  });
+  const what = `${keyLabelOf(pair[0])} + ${keyLabelOf(pair[1])}, ${socdModeLabel(socdMode, pair)}, ${delay} ms`;
+  if (ok) {
+    log('SOCD bound: ' + what);
+    saveState('SOCD bound');
+    setSelection([]);
+  } else {
+    log(`SOCD REJECTED (${what}) - keyboard holds ${JSON.stringify(after)}`);
+    saveState('SOCD refused', true);
+  }
+  renderSocd();
+  paintAdvTags();
+}
+
+async function deleteSocd() {
+  const pair = socdSelection();
+  if (!device || !advCache || !pair) return;
+  const saved = socdPairs().find(p => pair.includes(p.a) && pair.includes(p.b));
+  if (!saved) return;
+  saveState('Saving...', true);
+  for (const rc of pair) await sendAndWait(hkClearPacket(rc), 500);
+  const after = await rereadKeys(pair);
+  const ok = after.every(hk => hk && hk.type === HK_TYPE.None);
+  // Logged with everything it held, so a pair deleted by mistake can be put straight back.
+  const what = `${keyLabelOf(saved.a)} + ${keyLabelOf(saved.b)} (was ${socdModeLabel(saved.mode, [saved.a, saved.b])}, ${saved.delay} ms)`;
+  log(ok ? 'SOCD deleted: ' + what : `SOCD delete REJECTED: ${what} - keyboard holds ${JSON.stringify(after)}`);
+  saveState(ok ? 'SOCD deleted' : 'Delete refused', !ok);
+  if (ok) setSelection([]);
+  renderSocd();
+  paintAdvTags();
+}
+
+document.getElementById('socdBind').onclick = bindSocd;
+document.getElementById('socdDelete').onclick = deleteSocd;
+
+// S1, S2... on both keys of each pair, and the feature name on keys bound to something else.
+function paintAdvTags() {
+  const on = !document.getElementById('view-adv').hidden;
+  document.getElementById('kb').classList.toggle('adv', on);
+  const tags = new Map();   // rc -> [chip, tooltip]
+  if (on && advCache) {
+    socdPairs().forEach((p, i) => {
+      const chip = 'S' + (i + 1);
+      const tip = `SOCD ${keyLabelOf(p.a)} + ${keyLabelOf(p.b)}: ${socdModeLabel(p.mode, [p.a, p.b])}`;
+      tags.set(p.a, [chip, tip]);
+      tags.set(p.b, [chip, tip]);
+    });
+    for (const [rc, hk] of advCache) {
+      if (hk.type !== HK_TYPE.None && hk.type !== HK_TYPE.SOCD) {
+        const name = HK_NAMES[hk.type] || '?';
+        tags.set(rc, [name, name + ' binding (not editable here yet)']);
+      }
+    }
+  }
+  for (const [rc, el] of keyEl) {
+    const t = tags.get(rc);
+    const had = el.classList.contains('advtag');
+    el.classList.toggle('advtag', !!t);
+    el.children[3].textContent = t ? t[0] : 'RT';
+    if (t) el.title = t[1];
+    else if (had) el.title = '';
+  }
+}
+
+// What actually reaches the PC once the firmware has resolved the pair - the only way to see
+// a mode doing what its name says, short of opening a game.
+const socdHeld = new Set();
+let socdListening = false;
+function renderHeld() {
+  document.getElementById('socdTry').textContent =
+    'Held now: ' + ([...socdHeld].map(c => c.replace(/^(Key|Digit)/, '')).join(' + ') || 'nothing');
+}
+function onSocdKey(e) {
+  if (e.repeat) return;
+  if (e.type === 'keydown') socdHeld.add(e.code); else socdHeld.delete(e.code);
+  renderHeld();
+}
+function socdListen(on) {
+  if (on === socdListening) return;
+  socdListening = on;
+  for (const t of ['keydown', 'keyup']) window[on ? 'addEventListener' : 'removeEventListener'](t, onSocdKey);
+  socdHeld.clear();
+  renderHeld();
+}
+// A key released while the window was not focused never sends its keyup here.
+addEventListener('blur', () => { socdHeld.clear(); renderHeld(); });
+
 // One net under the gate that decides what hardware this tool will talk to.
 if (location.search.includes('selftest')) {
   const fake = (vendorId, out) => ({ vendorId, collections: [{ outputReports: out ? [{}] : [] }] });
@@ -2541,6 +2937,21 @@ if (location.search.includes('selftest')) {
   console.assert(laid.length === new Set(laid).size, 'no key is on the picker twice');
   console.assert(REMAP_KEYS.every(c => laid.includes(c)), 'every nameable key is on the picker');
   console.assert(laid.every(c => hidName(c)), 'every picker key has a name');
+  // SOCD is two mirrored packets, and the two "always wins" modes put different bytes on the
+  // two ends - the easiest thing here to get backwards.
+  const eq = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const [sockA, sockB] = socdPackets([3, 1], [3, 3], 4, 7, 0, 1);
+  console.assert(eq(sockA, [6, 2, 3, 1, 6, 3, 3, 4, 0, 7, 0, 0, 0, 1]), 'SOCD packet for key A');
+  console.assert(eq(sockB, [6, 2, 3, 3, 6, 3, 1, 7, 0, 4, 0, 0, 0, 2]), 'SOCD packet for key B mirrors A');
+  console.assert(socdPackets([3, 1], [3, 3], 4, 7, 0, 0).every(p => p[13] === 0) &&
+                 socdPackets([3, 1], [3, 3], 4, 7, 0, 3).every(p => p[13] === 3), 'last-input and neutral are symmetric');
+  console.assert(eq(socdPackets([3, 1], [3, 3], 4, 7, 300, 2)[0].slice(11), [44, 1, 2]), 'delay is LE16; B-wins puts 2 on A');
+  console.assert(eq(parseHigherKey(sockA).socd, { row2: 3, col2: 3, kcOwn: 4, kcPartner: 7, delay: 0, sByte: 1 }),
+                 'a written SOCD packet parses back');
+  console.assert(parseHigherKey([6, 1, 2, 5, 0]).socd === undefined, 'an unbound key carries no SOCD data');
+  console.assert(eq(hkClearPacket('2-5'), [6, 2, 2, 5, 0]), 'clearing writes type 0');
+  console.assert([0, 1, 2, 3].every(m => socdModeOf(SOCD_MODES[m][2]) === m) && socdModeOf(SOCD_MODES[1][3]) === 2,
+                 'a mode reads back from either end of the pair');
   console.log('selftest done');
 }
 
@@ -2551,6 +2962,7 @@ setRtMode(0);
 renderLighting();
 renderRates();
 renderRemap();
+renderSocd();
 </script>
 </body>
 </html>
