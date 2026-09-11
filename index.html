@@ -881,7 +881,17 @@ function onInputReport(e) {
   // Arrival-order matching gave those to the wrong caller, which is how a second tab
   // painted entire LED frames onto the wrong keys and made the board flicker.
   const i = waiters.findIndex(w => echoes(w.head, data));
-  if (i === -1) { log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]'); return; }
+  if (i === -1) {
+    log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]');
+    // The vendor's own bundle classifies an unsolicited [2,3,1,...] (Global/ConfigSwitch/
+    // Read) the same as an asked-for one - the only reason a transport layer would bother
+    // classifying an unrequested report that way is if the firmware actually sends one, on
+    // its own, when a hardware profile-switch key is pressed.
+    if (data[0] === CATEGORY.Global && data[1] === GLOBAL_SUB.ConfigSwitch && data[2] === CFG_OP.Read) {
+      onConfigChangedExternally(data[3]);
+    }
+    return;
+  }
   const w = waiters.splice(i, 1)[0];
   if (!w.quiet) log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]');
   w.resolve(data);
@@ -938,6 +948,7 @@ async function useDevice(d) {
   updateKbVisibility();
   log(`Connected to ${device.productName} (vid=0x${device.vendorId.toString(16)} pid=0x${device.productId.toString(16)})`);
   if (!document.getElementById('view-traveltest').hidden) setTravelTest(true);
+  startConfigPoll();
   // Rate first, before the 64-key loop below: it used to sit after loadAllModes(), so the
   // UI kept showing the old/default rate for as long as that ~64-round-trip read took
   // (visibly seconds) even though the read itself was correct once it finally ran.
@@ -1045,6 +1056,7 @@ document.getElementById('connectAny').onclick = () => connect(true);
 // to be talking to the wrong thing - so the two paths cannot drift apart.
 function resetDevice(msg) {
   setTravelTest(false);
+  stopConfigPoll();
   calibrating = false;
   device = null;
   const st = document.getElementById('status');
@@ -1138,6 +1150,40 @@ async function switchConfig(id) {
   await fillFormFrom(selected.values().next().value);
   await loadAllModes();
   saveState(`Switched to ${configLabel(currentConfig)}`);
+}
+
+// A key mapped to a profile switch (Settings > Remap > Functions > "Profile 2" etc.)
+// changes the config on the keyboard itself - this page finding out is a different problem
+// from switchConfig() above, which is what runs when THIS page asked for the change.
+// Same cleanup either way: a debounced write already pending belongs to the config being
+// left, and everything per-key on screen belongs to it too.
+async function onConfigChangedExternally(id) {
+  if (id === currentConfig) return;
+  clearTimeout(writeTimer);
+  writeAgain = false;
+  log(`Config changed on the keyboard itself (hardware profile key?): ${configLabel(currentConfig)} -> ${configLabel(id)}`);
+  currentConfig = id;
+  renderConfigPicker();
+  await fillFormFrom(selected.values().next().value);
+  await loadAllModes();
+}
+
+// Backstop for the push onInputReport listens for below. The vendor's own bundle already
+// classifies an unsolicited [2,3,1,...] report the same as a requested one ("switchConfig"),
+// which only makes sense if the firmware actually sends one on a hardware profile switch -
+// but their own UI never subscribes to that event, so there is no live reference behavior
+// to confirm it against. Poll as a fallback in case it turns out not to arrive on its own.
+let configPollTimer = null;
+function startConfigPoll() {
+  stopConfigPoll();
+  configPollTimer = setInterval(async () => {
+    if (!device || writing) return;
+    const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.Read], 1000, true);
+    if (res) await onConfigChangedExternally(res[3]);
+  }, 3000);
+}
+function stopConfigPoll() {
+  if (configPollTimer) { clearInterval(configPollTimer); configPollTimer = null; }
 }
 
 // Buttons rather than a dropdown, like every other fixed set of options here. The value
