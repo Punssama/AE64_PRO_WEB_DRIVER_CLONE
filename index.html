@@ -1762,9 +1762,11 @@ function decodeLight(res) {
            speed: res[7], direction: res[8], colorIdx: res[9] };
 }
 
-async function getLighting(area = lightArea) {
-  const res = await sendAndWait([CATEGORY.Lighting, LIGHT_OP.Read, area, LIGHT_CFG.Base], 600);
-  // A missing area answers with 255 where the area byte should be echoed back.
+async function getLighting(area = lightArea, timeout = 600) {
+  const res = await sendAndWait([CATEGORY.Lighting, LIGHT_OP.Read, area, LIGHT_CFG.Base], timeout);
+  // A missing area answers with 255 where the area byte should be echoed back - in theory.
+  // Measured on real hardware: it does not answer AT ALL, so every area this board does not
+  // have costs a full timeout instead of a fast "absent" reply. See loadLighting() below.
   return res && res[2] !== AREA_ABSENT ? decodeLight(res) : null;
 }
 
@@ -1863,9 +1865,17 @@ function renderLighting() {
 async function loadLighting() {
   if (!lightAreas.length) {
     // Ask the device which areas it has rather than assuming a model. Decorate2..5 exist
-    // in the protocol but not on this board, and they answer 255 when asked.
+    // in the protocol but not on this board - and this firmware simply never answers for
+    // an area it does not have, rather than the fast "absent" reply the byte layout has a
+    // slot for. Measured on real hardware: every one of those 4 missing areas sits out the
+    // full timeout before giving up, on every single connect - this loop alone was most of
+    // why the post-connect loading screen took several seconds.
+    // ponytail: 250ms is a guess at "clearly not USB-latency, clearly not a typical
+    // hardware response," not a measured floor - every reply actually seen on this board
+    // (present areas included) lands well under it. If a real area ever gets miscounted as
+    // absent, raise this, not the whole function's timeout.
     for (let a = AREA.Keyboard; a <= 5; a++) {
-      const st = await getLighting(a);
+      const st = await getLighting(a, 250);
       // Both lights run at the same time, so the preview needs every area's settings,
       // not just the selected one's.
       if (st) { lightAreas.push(a); lightStates[a] = st; }
@@ -1919,13 +1929,16 @@ for (const [id, key] of [['lightLum', 'luminance'], ['lightSpeed', 'speed']]) {
 // index row*21 + col - all 64 keys land on a real slot under that rule.
 const ledPackets = {};   // area -> how many packets its frame takes
 
-// Walk packets until the index byte answers 255. The lit-slot tail gives the exact LED
-// count; a dark frame has no lit slot, so whole packets are the fallback and only the
-// strip's granularity depends on it.
+// Walk packets until one past the last real one - in theory the index byte would answer
+// 255 there, but measured on real hardware it just never answers at all, so that one read
+// eats a full timeout on every single connect (same story as the area probe in
+// loadLighting() above; see the ponytail note there for why 250ms). The lit-slot tail gives
+// the exact LED count; a dark frame has no lit slot, so whole packets are the fallback and
+// only the strip's granularity depends on it.
 async function countSlots(area) {
   let packets = 0, tail = 0;
   for (let i = 0; i < 12; i++) {
-    const r = await sendAndWait([CATEGORY.Lighting, LIGHT_SUB_READBACK, area, i], 700);
+    const r = await sendAndWait([CATEGORY.Lighting, LIGHT_SUB_READBACK, area, i], 250);
     if (!r || r[3] === AREA_ABSENT) break;
     packets++;
     for (let k = 0; k < 15; k++) {
