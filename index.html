@@ -45,7 +45,17 @@
   #status { margin: 0; }
   #status::before { content: '[ '; }
   #status::after { content: ' ]'; }
-  .appbody { flex: 1; min-height: 0; display: grid; grid-template-columns: 152px minmax(0, 1fr) 272px; gap: 12px; padding: 12px; }
+  .appbody { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: 152px minmax(0, 1fr) 272px; gap: 12px; padding: 12px; }
+  /* Covers the sidebar/board/settings while the post-connect backlog (rate, lighting,
+     keymap, the 64-key scan) is still draining - picking a key or switching views before
+     that ioChain queue is empty was the actual cause of "wrong depth"/"test doesn't run" in
+     Travel test, not just something that looked slow. `inert` blocks focus and clicks on
+     everything under it (Chrome-only, same as WebHID itself, so no fallback needed); the
+     overlay on top of that is just what a person sees while it is up. */
+  #connectOverlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(18,53,43,.55); }
+  #connectOverlay p { margin: 0; background: var(--surface); border: 2px solid var(--ink); padding: 14px 22px; box-shadow: 5px 5px 0 rgba(18,53,43,.45); font-size: 18px; }
+  #connectOverlay p::after { content: '_'; animation: connectBlink 1s step-end infinite; }
+  @keyframes connectBlink { 50% { opacity: 0; } }
   .statusbar { flex: none; display: flex; align-items: center; gap: 12px; border-top: 2px solid var(--ink); background: var(--accent); padding: 3px 12px; }
   .statusbar p { margin: 0; }
   .statusbar .spacer { flex: 1; }
@@ -436,6 +446,8 @@
     <div class="gauge" id="gauge"></div>
   </aside>
 
+  <div id="connectOverlay" hidden><p>Reading configuration</p></div>
+
 </div>
 
 <div class="statusbar"><p id="selectedLabel">No keys picked yet.</p><span class="spacer"></span><p id="saveState"></p></div>
@@ -547,6 +559,17 @@ function updateKbVisibility() {
   document.getElementById('kbEmpty').hidden = on;
   document.getElementById('kb').hidden = !on;
   document.getElementById('kbTools').hidden = !on;
+}
+
+// The overlay covering everything is enough to stop clicks (it is on top, so it eats them),
+// but a keyboard user could still Tab into a covered button and activate it - `inert` is
+// what actually removes the sidebar/board/settings from focus and click handling while it
+// is up, native in every browser this tool can run in anyway (WebHID itself needs one).
+function setConnecting(on) {
+  document.getElementById('connectOverlay').hidden = !on;
+  for (const el of document.querySelectorAll('.appbody > :not(#connectOverlay)')) {
+    el.toggleAttribute('inert', on);
+  }
 }
 
 function renderKeyboard() {
@@ -947,28 +970,33 @@ async function useDevice(d) {
   st.classList.add('live');
   updateKbVisibility();
   log(`Connected to ${device.productName} (vid=0x${device.vendorId.toString(16)} pid=0x${device.productId.toString(16)})`);
-  if (!document.getElementById('view-traveltest').hidden) setTravelTest(true);
   startConfigPoll();
-  // Rate first, before the 64-key loop below: it used to sit after loadAllModes(), so the
-  // UI kept showing the old/default rate for as long as that ~64-round-trip read took
-  // (visibly seconds) even though the read itself was correct once it finally ran.
-  await readRate();
-  await fillFormFrom(selected.values().next().value);
-  await loadLighting();
-  // Layer 0 explicitly, not whatever `remapLayer` happens to be left over from a prior
-  // session (e.g. the Functions tab was open when the keyboard disconnected) - the board
-  // outside the Remap view always wants the base layer. The Fn layer is read lazily by
-  // setRemapLayer() the first time the Functions tab opens.
-  if (await loadKeymap(0)) await refreshKeymap(0);
-  paintCaps();
-  // Last, not third: everything above answers in one exchange or a handful, but this walks
-  // all 64 keys - by far the biggest thing on this list. It shares the same ioChain with
-  // Travel test's own polling loop, which starts above (setTravelTest(true)) the moment
-  // this connect is for a page already sitting on that view - putting the 64-key scan
-  // first meant a key picked and pressed right after connect sat behind a queue of ~64
-  // unrelated reads before its own first sample (or the right keyTravel scale for it,
-  // which this scan is also what supplies) came back at all.
-  await loadAllModes();
+  // Everything below is one long queue on the same ioChain (rate, lighting, keymap, the
+  // 64-key scan) - a key picked or a view opened while it is still draining used to be the
+  // actual cause of "wrong depth"/"test doesn't run" in Travel test, not just something
+  // that looked slow. In practice it clears in a second or two, so block interaction with a
+  // loading screen for that long instead of chasing every individual race it could cause.
+  setConnecting(true);
+  try {
+    await readRate();
+    await fillFormFrom(selected.values().next().value);
+    await loadLighting();
+    // Layer 0 explicitly, not whatever `remapLayer` happens to be left over from a prior
+    // session (e.g. the Functions tab was open when the keyboard disconnected) - the board
+    // outside the Remap view always wants the base layer. The Fn layer is read lazily by
+    // setRemapLayer() the first time the Functions tab opens.
+    if (await loadKeymap(0)) await refreshKeymap(0);
+    paintCaps();
+    // Last, not third: everything above answers in one exchange or a handful, but this
+    // walks all 64 keys - by far the biggest thing on this list.
+    await loadAllModes();
+  } finally {
+    setConnecting(false);
+  }
+  // Only now, not at the top: it shares the same ioChain as everything above, and the
+  // loading screen already made the user wait for that queue to clear once - no reason to
+  // make Travel test's own reads wait behind it too if it starts turning the loop on again.
+  if (!document.getElementById('view-traveltest').hidden) setTravelTest(true);
   return true;
 }
 
@@ -1057,6 +1085,7 @@ document.getElementById('connectAny').onclick = () => connect(true);
 function resetDevice(msg) {
   setTravelTest(false);
   stopConfigPoll();
+  setConnecting(false); // in case the device vanished mid-connect, loading screen still up
   calibrating = false;
   device = null;
   const st = document.getElementById('status');
