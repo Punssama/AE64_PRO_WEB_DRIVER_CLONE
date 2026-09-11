@@ -2746,7 +2746,7 @@ function renderSocd() {
   for (const p of pairs) {
     const b = document.createElement('button');
     b.textContent = `${keyLabelOf(p.a)} + ${keyLabelOf(p.b)} · ${socdModeLabel(p.mode, [p.a, p.b])} · ${p.delay} ms`;
-    if (saved === p) b.className = 'on';
+    if (saved && saved.a === p.a) b.className = 'on';
     b.onclick = () => selectSocdPair(p);
     list.appendChild(b);
   }
