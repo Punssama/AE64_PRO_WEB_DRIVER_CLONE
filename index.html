@@ -783,6 +783,8 @@ function updateSelectionUI() {
   const rc = selected.values().next().value;
   document.getElementById('selectedLabel').textContent =
     n === 0 ? 'No keys picked yet. Click a key to start; click it again to drop it.' :
+    // Advanced keys write nothing until Bind, so "saves instantly" would be a lie there.
+    !document.getElementById('view-adv').hidden ? `${[...selected].map(k => KEY_LABEL.get(k)).join(' + ')} picked - nothing is written until Bind.` :
     n === 1 ? `1 key picked: ${KEY_LABEL.get(rc)} - changes save instantly.` :
     // Say the blast radius before they touch a control, not after: there is no Save
     // button to think twice at any more, so one nudge rewrites every selected key.
