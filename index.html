@@ -1397,45 +1397,44 @@ function paintTravelRow(row, data) {
 // unthrottled, because the sample rate on the watched key is what decides how tightly the
 // switching point can be pinned down. But painting that same sample (21 fill bars, the
 // live marker, the readout text) doesn't need to happen any faster than the screen can
-// show it - doing it on every sample too was pegging the main thread and made the rest of
-// the board's fill bars (repainted every 10th pass) visibly stutter. rAF-gate the paint,
+// show it - doing it on every sample too was pegging the main thread. rAF-gate the paint,
 // not the read: it applies whatever the latest sample was once per frame.
-let travelPaintPending = false, pendingWatched = null, pendingOther = null;
+let travelPaintPending = false, pendingWatched = null;
 function scheduleTravelPaint() {
   if (travelPaintPending) return;
   travelPaintPending = true;
   requestAnimationFrame(() => {
     travelPaintPending = false;
-    if (!travelRunning) return; // a queued frame must not repaint after clearTravelPaint()
-    if (pendingWatched) {
-      const { row, data, rc, route } = pendingWatched;
-      pendingWatched = null;
-      paintTravelRow(row, data);
-      renderTT(route);
-      const live = document.getElementById('liveMark');
-      if (live) {
-        const full = keyTravel.get(rc) || 3390;
-        live.hidden = false;
-        live.style.top = Math.max(0, Math.min(100, (route / full) * 100)) + '%';
-        live.querySelector('span').textContent = 'now ' + MM(route);
-      }
-    }
-    if (pendingOther) {
-      paintTravelRow(pendingOther.row, pendingOther.data);
-      pendingOther = null;
+    if (!travelRunning || !pendingWatched) return; // a queued frame must not repaint after clearTravelPaint()
+    const { row, data, rc, route } = pendingWatched;
+    pendingWatched = null;
+    paintTravelRow(row, data);
+    renderTT(route);
+    const live = document.getElementById('liveMark');
+    if (live) {
+      const full = keyTravel.get(rc) || 3390;
+      live.hidden = false;
+      live.style.top = Math.max(0, Math.min(100, (route / full) * 100)) + '%';
+      live.querySelector('span').textContent = 'now ' + MM(route);
     }
   });
 }
 
-// The watched key's row is read every pass (travel AND status, so edges are caught with
-// as little lag as possible); the other rows take turns, one per pass, just to keep the
-// rest of the board's fill alive without blunting the measurement that matters.
-let travelRunning = false, rrRow = 0;
+// Only the watched row is read/painted while a key is selected - reading the other rows
+// too (to keep their fill "alive") cost an extra HID round trip every 10th pass, and on
+// real hardware that was enough to make those rows visibly lag behind the watched one.
+// Not worth it: the point of this view is one key's precise reading, not a full-board
+// meter. Selecting a key clears the board first so old fill doesn't sit there stale.
+let travelRunning = false;
 async function travelLoop() {
   while (travelRunning) {
     if (device && !writing) {
       const rc = selected.values().next().value || null;
-      if (rc !== tt.rc) resetTT(rc);
+      if (rc !== tt.rc) {
+        resetTT(rc);
+        pendingWatched = null; // drop any not-yet-painted sample from whatever key this replaces
+        if (rc) clearTravelPaint();
+      }
       if (rc) {
         const [row, col] = rc.split('-').map(Number);
         const ks = await getAxisRow(AXIS_MODE.KeyStatus, row, 300);
@@ -1444,13 +1443,6 @@ async function travelLoop() {
           feedTT(rt.data[col], ks.data[col]);
           pendingWatched = { row, data: rt.data, rc, route: rt.data[col] };
           scheduleTravelPaint();
-        }
-        // Other rows only every 10th pass: sample rate on the watched key is what
-        // decides how tightly the switching point can be pinned down.
-        const other = KB_ROWS[(rrRow++ / 10 | 0) % KB_ROWS.length];
-        if (rrRow % 10 === 0 && other !== row) {
-          const o = await getAxisRow(AXIS_MODE.Route, other, 300);
-          if (o) { pendingOther = { row: other, data: o.data }; scheduleTravelPaint(); }
         }
       } else {
         renderTT(0);
