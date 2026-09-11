@@ -3240,48 +3240,60 @@ function endPacket(rc, kcs, nums) {
           ...u16le16bit(kcs[0]), ...u16le16bit(kcs[1]), ...u16le16bit(nums[0])];
 }
 
-// ponytail: a few fields below are read from the wire exactly as the vendor sends them,
-// but their real-world unit/meaning is not fully nailed down - cross-checked against the
-// vendor's own official SDK docs (sparklinkplayjoy.github.io/keyboard-docs, a sibling
-// product line's public API reference) as well as outside sources, not just guessed:
-// - DKS trps are raw UNSCALED BYTES (0-255), not the LE16 x1000 mm every other depth
-//   field on this device uses. A percentage of travel fits a byte cleanly and matches
-//   END's own "10%-90% rebound travel" copy - the best-supported guess. Telling: even
-//   the vendor's OWN SDK docs call this out as unclear ("trps values represent trigger
-//   point travel parameters, e.g. 63 needs converting to binary") without explaining
-//   what that conversion is, so this is not just a gap in what I could find.
-// - END: the official docs settle the "position vs time" question the vendor's own
-//   source-code name (`delay`) left open - getEND()/setEND() both document it in plain
-//   ms. What's still a guess is the user's own read of the FEATURE (confirmed nowhere
-//   in writing, but consistent with everything found): one trigger point, crossed going
-//   down fires the Press key, crossed going up (rebounding) fires the Release key, and
-//   Delay is a timing gap around that crossing rather than the point's position.
-// - MT's "Hold threshold": the official docs attach a "value is in 10ms units" note to
-//   a function they call getMtorTgl/setMT - but TGL's own getTGL()/setTGL() are
-//   separately documented in plain ms, and MT/TGL are unambiguously two different wire
-//   types on this device's own firmware (different byte layout, both verified live) -
-//   so it's unclear the 10ms-unit note even applies to THIS type=3, and the wire
-//   encoding itself (a plain LE16, round-tripped exactly on hardware) doesn't disambiguate
-//   "300" meaning 300ms from meaning 3000ms. Left as plain ms pending a hardware test.
+// ponytail: field units/labels below are cross-checked against the vendor's own live UI
+// (xsyd.top/v2-app/device, viewed connected to the user's own board 2026-09-13) and its
+// public SDK docs (sparklinkplayjoy.github.io/keyboard-docs), not just guessed:
+// - DKS trps are raw UNSCALED BYTES (0-255) on the wire, but the vendor's own UI shows
+//   them as real mm ("1.40mm", "3.00mm" on this exact board) - so byte/255 * this key's
+//   own axisRangeMax is the display conversion (same per-key calibration Performance and
+//   Travel test already use), not the flat percentage this file guessed before actually
+//   seeing that screen. Converted at the render/bind boundary below; dksPacket() itself
+//   still takes and returns raw bytes, unchanged from what the selftest already covers.
+// - END: the vendor's own UI literally labels these "Press Trigger" / "Release Trigger" /
+//   "Trigger Delay 0ms" - confirms both the Press/Release framing already used here and
+//   that Delay is plain ms, defaulting to 0. (What "Trigger Delay" does exactly - a
+//   position, a debounce window, something else - is still not spelled out anywhere
+//   found, vendor UI included.)
+// - MT: the vendor's own UI shows "Trigger time < 200ms" / "> 200ms" for Click vs Hold -
+//   confirms 200 is a sane default and the unit is plain ms, not the "10ms units" the
+//   SDK docs attach to a same-ish-named function elsewhere (that note appears not to
+//   apply to this device's actual MT wire type, consistent with MT/TGL being two
+//   unambiguously different byte layouts here, both verified live).
+// - TGL: the vendor's own UI exposes ONE key slot and no delay/repeat control at all for
+//   this feature - so `time` is sent as 0 always here too, not user-editable, rather than
+//   presenting a guessed "repeat interval" the original doesn't even surface.
 const HK_SINGLE_SPECS = {
   dks: {
     type: HK_TYPE.DKS, field: 'dks', label: 'DKS',
     // Each stage is its own row: which key it sends, and (DKS's own number) how far
     // through the press it fires. The 2 dead-zones apply to the whole binding, not one
     // stage, so they sit separately in `extra` rather than getting a 5th/6th "stage".
+    // Trigger points shown/entered in mm, matching the vendor's own UI - see the trps
+    // note above. defaultNums roughly mirrors what a fresh key showed there: shallow
+    // press, near bottom-out, mirrored on the way back up.
     rows: [
-      { slot: 'Press', num: { label: '%', min: 0, max: 100, step: 1 } },
-      { slot: 'Bottom', num: { label: '%', min: 0, max: 100, step: 1 } },
-      { slot: 'Release', num: { label: '%', min: 0, max: 100, step: 1 } },
-      { slot: 'Lift', num: { label: '%', min: 0, max: 100, step: 1 } },
+      { slot: 'Press', num: { label: 'mm', min: 0, max: 4, step: 0.05 } },
+      { slot: 'Bottom', num: { label: 'mm', min: 0, max: 4, step: 0.05 } },
+      { slot: 'Release', num: { label: 'mm', min: 0, max: 4, step: 0.05 } },
+      { slot: 'Lift', num: { label: 'mm', min: 0, max: 4, step: 0.05 } },
     ],
     extra: [
       { label: 'Press dead-zone (mm)', min: 0, max: 4, step: 0.05 },
       { label: 'Release dead-zone (mm)', min: 0, max: 4, step: 0.05 },
     ],
-    defaultNums: [15, 85, 60, 10, 0.2, 0.2],
-    getCurrent: hk => ({ kcs: hk.dks.kcs, nums: [...hk.dks.trps, ...hk.dks.dbs] }),
-    packet: dksPacket,
+    defaultNums: [0.3, 3.0, 3.0, 0.3, 0.2, 0.2],
+    // travelRaw is this key's axisRangeMax (u16, not yet /1000), from keyTravel - already
+    // populated for every key by loadAllModes() on connect, so no extra read is needed
+    // here. Falls back to a nominal 3.4mm if a key's travel genuinely was never read.
+    getCurrent: (hk, travelRaw) => {
+      const travel = (travelRaw || 3400) / 1000;
+      return { kcs: hk.dks.kcs, nums: [...hk.dks.trps.map(b => +(b / 255 * travel).toFixed(2)), ...hk.dks.dbs] };
+    },
+    packet: (rc, kcs, nums, travelRaw) => {
+      const travel = (travelRaw || 3400) / 1000;
+      const trps = nums.slice(0, 4).map(mm => Math.max(0, Math.min(255, Math.round(mm / travel * 255))));
+      return dksPacket(rc, kcs, [...trps, ...nums.slice(4)]);
+    },
   },
   mpt: {
     type: HK_TYPE.MPT, field: 'mpt', label: 'MPT',
@@ -3309,7 +3321,9 @@ const HK_SINGLE_SPECS = {
   },
   tgl: {
     type: HK_TYPE.TGL, field: 'tgl', label: 'TGL',
-    rows: [{ slot: 'Toggles', num: { label: 'repeat ms', min: 0, max: 1000, step: 10 } }],
+    // The vendor's own UI has no delay/repeat control for this feature at all - one key
+    // slot only - so time is always sent as 0 here too rather than exposing a guess.
+    rows: [{ slot: 'Toggles', num: null }],
     extra: [],
     defaultNums: [0],
     getCurrent: hk => ({ kcs: [hk.tgl.kc], nums: [hk.tgl.time] }),
@@ -3317,12 +3331,12 @@ const HK_SINGLE_SPECS = {
   },
   end: {
     type: HK_TYPE.END, field: 'end', label: 'END',
-    // Neither slot has its own number - Delay is one value for the whole binding.
+    // Neither slot has its own number - Trigger Delay is one value for the whole binding.
     rows: [
       { slot: 'Press', num: null },
       { slot: 'Release', num: null },
     ],
-    extra: [{ label: 'Delay (ms)', min: 0, max: 1000, step: 10 }],
+    extra: [{ label: 'Trigger Delay (ms)', min: 0, max: 1000, step: 10 }],
     defaultNums: [0],
     getCurrent: hk => ({ kcs: hk.end.kcs, nums: [hk.end.delay] }),
     packet: endPacket,
@@ -3420,7 +3434,7 @@ function renderHkSingle(prefix, spec) {
   const bound = !!(hk && hk.type === spec.type);
 
   if (!rc || !hkEdit || hkEdit.prefix !== prefix || hkEdit.rc !== rc) {
-    const seed = bound ? spec.getCurrent(hk) : { kcs: spec.rows.map(() => 0), nums: spec.defaultNums.slice() };
+    const seed = bound ? spec.getCurrent(hk, keyTravel.get(rc)) : { kcs: spec.rows.map(() => 0), nums: spec.defaultNums.slice() };
     hkEdit = rc ? { prefix, rc, kcs: seed.kcs.slice(), nums: seed.nums.slice() } : null;
   }
 
@@ -3452,7 +3466,7 @@ function renderHkSingle(prefix, spec) {
   if (!keys.length) { list.innerHTML = `<p class="hint">No ${spec.label} keys on this config.</p>`; return; }
   for (const krc of keys) {
     const b = document.createElement('button');
-    const cur = spec.getCurrent(advCache.get(krc));
+    const cur = spec.getCurrent(advCache.get(krc), keyTravel.get(krc));
     b.textContent = `${keyLabelOf(krc)} -> ${cur.kcs.map(c => c ? keyName(c) : '?').join(' / ')}`;
     if (rc === krc) b.className = 'on';
     b.onclick = () => setSelection([krc]);
@@ -3472,7 +3486,7 @@ async function bindHkSingle(prefix, spec) {
     return;
   }
   saveState('Saving...', true);
-  const pkt = spec.packet(rc, kcs, nums);
+  const pkt = spec.packet(rc, kcs, nums, keyTravel.get(rc));
   if (!await sendAndWait(pkt, 500)) {
     log(`${spec.label}: no answer to the write.`);
     saveState(`${spec.label} failed`, true);
@@ -3482,9 +3496,14 @@ async function bindHkSingle(prefix, spec) {
     return;
   }
   // The echo only proves the packet arrived - read the key back and compare field by field.
+  // A tolerance on the numbers, not exact equality: DKS's trps round-trip through a single
+  // byte (~0.013mm/step on this board), so round(mm->byte)->mm can legitimately land one
+  // 0.01 off the typed value even when the firmware wrote exactly the byte that was sent.
+  // No-op for every other type here, whose numbers hit the wire with far finer precision.
   const [after] = await rereadKeys([rc]);
-  const got = after && after.type === spec.type ? spec.getCurrent(after) : null;
-  const ok = !!got && JSON.stringify(got.kcs) === JSON.stringify(kcs) && JSON.stringify(got.nums) === JSON.stringify(nums);
+  const got = after && after.type === spec.type ? spec.getCurrent(after, keyTravel.get(rc)) : null;
+  const ok = !!got && JSON.stringify(got.kcs) === JSON.stringify(kcs) &&
+             got.nums.length === nums.length && got.nums.every((v, i) => Math.abs(v - nums[i]) < 0.02);
   const what = `${keyLabelOf(rc)} -> ${kcs.map(keyName).join(' / ')}`;
   if (ok) {
     log(`${spec.label} bound: ${what}`);
@@ -3502,7 +3521,7 @@ async function deleteHkSingle(prefix, spec) {
   if (!device || !advCache || !rc) return;
   const hk = advCache.get(rc);
   if (!hk || hk.type !== spec.type) return;
-  const was = spec.getCurrent(hk);
+  const was = spec.getCurrent(hk, keyTravel.get(rc));
   saveState('Saving...', true);
   await sendAndWait(hkClearPacket(rc), 500);
   const [after] = await rereadKeys([rc]);
