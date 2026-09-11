@@ -593,14 +593,19 @@ async function toggleKey(row, col) {
   if (!document.getElementById('view-remap').hidden || !document.getElementById('view-traveltest').hidden) selected.clear();
   selected.add(rc);
   updateSelectionUI();
-  await fillFormFrom(rc);
+  // Only the Settings view shows this form - reading it on every pick elsewhere queued an
+  // extra exchange in front of whatever that view actually needed next (e.g. Travel test's
+  // first reads for the newly watched key, right when a smooth start mattered most). The
+  // view-switcher reads it fresh when Settings is opened instead.
+  if (!document.getElementById('view-performance').hidden) await fillFormFrom(rc);
 }
 
 function setSelection(rcs) {
   selected.clear();
   rcs.forEach(rc => selected.add(rc));
   updateSelectionUI();
-  return fillFormFrom(selected.values().next().value);
+  // Same reasoning as toggleKey(): only worth the read where the form is actually shown.
+  if (!document.getElementById('view-performance').hidden) return fillFormFrom(selected.values().next().value);
 }
 
 async function fillFormFrom(rc) {
@@ -767,6 +772,8 @@ for (const btn of document.querySelectorAll('.navbtn')) {
     // auto-save for the io chain and keeps the device busy for nothing.
     if (btn.dataset.view === 'log') fitLog();
     if (btn.dataset.view === 'light' && device) loadLighting();
+    // toggleKey() skips this read when picked from another view, so it may be stale here.
+    if (btn.dataset.view === 'performance' && device && selected.size) fillFormFrom(selected.values().next().value);
     if (btn.dataset.view === 'remap') {
       renderRemap();
       if (device) loadKeymap().then(ok => ok && refreshKeymap()).then(renderRemap);
@@ -863,7 +870,6 @@ const echoes = (head, data) => head.every((b, i) => data[i] === b);
 
 function onInputReport(e) {
   const data = new Uint8Array(e.data.buffer);
-  log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]');
   // Hand the reply to the request that actually asked for it, rather than to whoever
   // is next in the queue. Reports arrive here that nobody in this page asked for: the
   // keyboard emits some by itself ([2,8,...] and [2,10,...] turn up right after
@@ -872,7 +878,10 @@ function onInputReport(e) {
   // Arrival-order matching gave those to the wrong caller, which is how a second tab
   // painted entire LED frames onto the wrong keys and made the board flicker.
   const i = waiters.findIndex(w => echoes(w.head, data));
-  if (i !== -1) waiters.splice(i, 1)[0].resolve(data);
+  if (i === -1) { log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]'); return; }
+  const w = waiters.splice(i, 1)[0];
+  if (!w.quiet) log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]');
+  w.resolve(data);
 }
 
 // The AE64 Pro's vendor id. Filtering on it is what keeps every other HID device on the
@@ -980,20 +989,27 @@ navigator.hid?.addEventListener('connect', async ({ device: d }) => {
 // Auto-save writes, the connect-time mode scan and the travel poll all run on their own
 // schedules now, so funnel every exchange through one chain that keeps a single one in flight.
 let ioChain = Promise.resolve();
-function sendAndWait(bytes, timeout = 1000) {
-  const run = () => sendAndWaitRaw(bytes, timeout);
+// quiet skips the OUT/IN log lines - only for polling loops that can run at hundreds of
+// exchanges per second (Travel test), where logging every one of them was the real cost:
+// log() appends to logEl.textContent, and a += on a DOM node's text re-serializes the
+// WHOLE accumulated string each time, so its cost tracks total log size for the session,
+// not just this one line. That is also why it got worse the longer a session ran, not
+// just the longer one watch lasted - an earlier burst of logged traffic left the string
+// long before this one even started.
+function sendAndWait(bytes, timeout = 1000, quiet = false) {
+  const run = () => sendAndWaitRaw(bytes, timeout, quiet);
   const next = ioChain.then(run, run);
   ioChain = next.catch(() => {});
   return next;
 }
 
-async function sendAndWaitRaw(bytes, timeout = 1000) {
+async function sendAndWaitRaw(bytes, timeout = 1000, quiet = false) {
   if (!device) { log('Not connected.'); return null; }
   const payload = build64(bytes);
-  log('OUT [' + bytes.join(',') + ']');
+  if (!quiet) log('OUT [' + bytes.join(',') + ']');
   const head = bytes.slice(0, 4);
   const p = new Promise((resolve) => {
-    const w = { head, resolve };
+    const w = { head, resolve, quiet };
     waiters.push(w);
     setTimeout(() => {
       const i = waiters.indexOf(w);
@@ -1252,8 +1268,8 @@ function unpackAction(b, i = 0) {
   return { down: v >>> 31 === 1, delay: (v >>> 16) & MACRO_DELAY_MAX, code: v & 0xffff };
 }
 
-async function getAxisRow(mode, row, timeout = 400) {
-  const res = await sendAndWait([CATEGORY.Performance, PERF_SUB.AxisData, mode, row], timeout);
+async function getAxisRow(mode, row, timeout = 400, quiet = false) {
+  const res = await sendAndWait([CATEGORY.Performance, PERF_SUB.AxisData, mode, row], timeout, quiet);
   if (!res) return null;
   const data = [];
   for (let i = 4; i + 1 < 64; i += 2) data.push(res[i] | res[i + 1] << 8);
@@ -1438,8 +1454,10 @@ async function travelLoop() {
       }
       if (rc) {
         const [row, col] = rc.split('-').map(Number);
-        const ks = await getAxisRow(AXIS_MODE.KeyStatus, row, 300);
-        const rt = await getAxisRow(AXIS_MODE.Route, row, 300);
+        // Quiet: this pair runs with no delay between passes while a key is watched, so
+        // logging both every time is exactly the hot loop the log's own cost punishes most.
+        const ks = await getAxisRow(AXIS_MODE.KeyStatus, row, 300, true);
+        const rt = await getAxisRow(AXIS_MODE.Route, row, 300, true);
         if (rt && ks) {
           feedTT(rt.data[col], ks.data[col]);
           pendingWatched = { rc, route: rt.data[col] };
@@ -1449,7 +1467,7 @@ async function travelLoop() {
         renderTT(0);
         for (const row of KB_ROWS) {
           if (!travelRunning) break;
-          const r = await getAxisRow(AXIS_MODE.Route, row, 300);
+          const r = await getAxisRow(AXIS_MODE.Route, row, 300, true);
           if (r) paintTravelRow(row, r.data);
         }
       }
@@ -1486,7 +1504,7 @@ async function pollCalibrationProgress() {
     if (device && !writing) {
       for (const row of KB_ROWS) {
         if (!calibrating) break;
-        const r = await getAxisRow(AXIS_MODE.Route, row);
+        const r = await getAxisRow(AXIS_MODE.Route, row, 400, true); // same hot-loop-logging cost as travelLoop
         if (!r) continue;
         for (let col = 0; col < r.data.length; col++) {
           const rc = `${row}-${col}`;
@@ -1841,9 +1859,12 @@ async function buildStrip() {
 const isBright = (R, G, B) => 0.299 * R + 0.587 * G + 0.114 * B > 140;
 
 async function readFrame(area) {
+  // Only called from ledLoop below, at up to ~33 frames/sec - quiet for the same reason
+  // travelLoop's reads are: logging every packet of every frame is what made this loop
+  // itself slow to watch, not the reads.
   const out = [];
   for (let i = 0; i < (ledPackets[area] || 0); i++) {
-    const r = await sendAndWait([CATEGORY.Lighting, LIGHT_SUB_READBACK, area, i], 700);
+    const r = await sendAndWait([CATEGORY.Lighting, LIGHT_SUB_READBACK, area, i], 700, true);
     if (!r) return null;
     for (let k = 0; k < 15; k++) {
       const o = 4 + k * 4;
