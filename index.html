@@ -1862,28 +1862,62 @@ function renderLighting() {
   });
 }
 
+// Which areas a board has and how many packets each one's frame takes is a property of
+// the model (vendorId+productId), not of any one connect - remembered here so only the
+// first-ever connect to a given model pays for the probe below. A different model gets its
+// own key, so this can't hand a wrong shape to a board it was never measured on.
+const lightShapeKey = () => `ae64-light-shape:${device.vendorId}:${device.productId}`;
+
+function renderStripDom(n) {
+  const strip = document.getElementById('ledStrip');
+  strip.innerHTML = '';
+  for (let i = 0; i < n; i++) strip.appendChild(document.createElement('i'));
+}
+
 async function loadLighting() {
   if (!lightAreas.length) {
-    // Ask the device which areas it has rather than assuming a model. Decorate2..5 exist
-    // in the protocol but not on this board - and this firmware simply never answers for
-    // an area it does not have, rather than the fast "absent" reply the byte layout has a
-    // slot for. Measured on real hardware: every one of those 4 missing areas sits out the
-    // full timeout before giving up, on every single connect - this loop alone was most of
-    // why the post-connect loading screen took several seconds.
-    // ponytail: 250ms is a guess at "clearly not USB-latency, clearly not a typical
-    // hardware response," not a measured floor - every reply actually seen on this board
-    // (present areas included) lands well under it. If a real area ever gets miscounted as
-    // absent, raise this, not the whole function's timeout.
-    for (let a = AREA.Keyboard; a <= 5; a++) {
-      const st = await getLighting(a, 250);
-      // Both lights run at the same time, so the preview needs every area's settings,
-      // not just the selected one's.
-      if (st) { lightAreas.push(a); lightStates[a] = st; }
+    let shape = null;
+    try { shape = JSON.parse(localStorage.getItem(lightShapeKey())); } catch (err) { /* private mode, corrupt value, etc - just re-discover below */ }
+    if (shape && Array.isArray(shape.areas) && shape.areas.length) {
+      // ponytail: stripLeds is cached as whatever the first-ever discovery measured, which
+      // depends on what was actually lit at that moment (a dark strip undercounts to whole
+      // packets - see countSlots()). Frozen from here on rather than re-measured every
+      // connect; if it ever visibly disagrees with the real strip, clearing this browser's
+      // site data forces a fresh discovery.
+      lightAreas = shape.areas.slice();
+      Object.assign(ledPackets, shape.packets || {});
+      stripLeds = shape.stripLeds || 0;
+      if (lightAreas.includes(AREA.Decorate1)) renderStripDom(stripLeds);
+      // Both lights run at the same time, so the preview needs every area's settings, not
+      // just the selected one's - cheap now, since it's at most the 1-2 areas this exact
+      // board is already known to have, not a 6-area probe.
+      for (const a of lightAreas) {
+        const st = await getLighting(a);
+        if (st) lightStates[a] = st;
+      }
+      log('Lighting areas (remembered from a previous connect): ' + lightAreas.map(areaName).join(', '));
+    } else {
+      // Ask the device which areas it has rather than assuming a model. Decorate2..5 exist
+      // in the protocol but not on this board - and this firmware simply never answers for
+      // an area it does not have, rather than the fast "absent" reply the byte layout has a
+      // slot for. Measured on real hardware: every one of those 4 missing areas sits out the
+      // full timeout before giving up. Only ever runs once per model now (see above).
+      // ponytail: 250ms is a guess at "clearly not USB-latency, clearly not a typical
+      // hardware response," not a measured floor - every reply actually seen on this board
+      // (present areas included) lands well under it. If a real area ever gets miscounted as
+      // absent, raise this, not the whole function's timeout.
+      for (let a = AREA.Keyboard; a <= 5; a++) {
+        const st = await getLighting(a, 250);
+        if (st) { lightAreas.push(a); lightStates[a] = st; }
+      }
+      // The mirror needs to know how many packets a frame takes before it can read one.
+      await countSlots(AREA.Keyboard);
+      if (lightAreas.includes(AREA.Decorate1)) await buildStrip();
+      log('Lighting areas: ' + (lightAreas.map(areaName).join(', ') || 'none'));
+      try {
+        localStorage.setItem(lightShapeKey(), JSON.stringify({ areas: lightAreas, packets: ledPackets, stripLeds }));
+      } catch (err) { /* not fatal - just re-discovers on the next connect too */ }
     }
-    // The mirror needs to know how many packets a frame takes before it can read one.
-    await countSlots(AREA.Keyboard);
-    if (lightAreas.includes(AREA.Decorate1)) await buildStrip();
-    log('Lighting areas: ' + (lightAreas.map(areaName).join(', ') || 'none'));
   }
   lightState = await getLighting();
   lightStates[lightArea] = lightState;
@@ -1952,9 +1986,7 @@ async function countSlots(area) {
 
 async function buildStrip() {
   stripLeds = await countSlots(AREA.Decorate1);
-  const strip = document.getElementById('ledStrip');
-  strip.innerHTML = '';
-  for (let i = 0; i < stripLeds; i++) strip.appendChild(document.createElement('i'));
+  renderStripDom(stripLeds);
   log('Decorative strip: ' + stripLeds + ' LEDs.');
 }
 
