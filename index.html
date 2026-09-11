@@ -75,11 +75,15 @@
      dead-zones, END's delay) sit below as their own compact row. */
   .hkslots { display: flex; flex-direction: column; gap: 4px; }
   .hkstage { display: flex; align-items: center; gap: 8px; }
-  .hkstage input[type=number] { width: 60px; padding: 2px 6px; }
-  .hknums { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .hkstage .ctl, .hknums .ctl { gap: 6px; }
+  .hkstage input[type=range], .hknums input[type=range] { width: 90px; }
+  .hkstage input[type=number], .hknums input[type=number] { width: 60px; padding: 2px 6px; }
+  /* Column, not a wrapping row: with a slider in each field two rarely fit side by side
+     (DKS's two dead-zone labels alone are wider than that), so lay them out the same
+     deliberate one-per-line shape .hkstage already uses instead of leaving it to wrap. */
+  .hknums { display: flex; flex-direction: column; gap: 4px; }
   .hknums .numfield { display: flex; align-items: center; gap: 5px; }
   .hknums .numfield label { white-space: nowrap; }
-  .hknums input[type=number] { width: 68px; padding: 2px 6px; }
   .statusbar { flex: none; display: flex; align-items: center; gap: 12px; border-top: 2px solid var(--ink); background: var(--accent); padding: 3px 12px; }
   .statusbar p { margin: 0; }
   .statusbar .spacer { flex: 1; }
@@ -299,6 +303,9 @@
   .lightrow .toggle { margin-bottom: 0; width: 200px; flex: none; }
   .lightrow .hint { margin: 0; }
   .lightrow select { padding: 4px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
+  /* Longer label than the other toggle on this row (Lighting) needs more than its 200px. */
+  #customPaintToggle { width: 250px; }
+  #customBrush { width: 42px; height: 32px; padding: 2px; border: 2px solid var(--ink); background: var(--surface); cursor: pointer; flex: none; }
   .pick { display: flex; gap: 4px; flex-wrap: wrap; }
   .pick button { padding: 3px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); min-width: 34px; }
   .pick button.on, .pick button.on:hover { background: var(--ink); color: var(--accent); }
@@ -632,6 +639,14 @@
         <div class="field"><label>Direction</label><div class="pick" id="lightDir"></div></div>
         <div class="field"><label>Colour</label><div class="pick" id="lightPalette"></div></div>
       </div>
+      <div class="lightrow">
+        <button id="customPaintToggle" class="toggle" aria-pressed="false">
+          <span>Paint custom colours</span><span class="tog">OFF</span>
+        </button>
+        <input type="color" id="customBrush" value="#ff2d55">
+        <button id="customClear">Clear all custom</button>
+        <span class="hint">Click a key above to paint it - saved on the keyboard, no separate save needed.</span>
+      </div>
     </div>
 
   </section>
@@ -696,6 +711,10 @@ const LIGHT_OPEN = { Close: 0, Open: 1 };
 // Va.ReadBack - hands back the frame the firmware is drawing right now, 15 LEDs per
 // packet, four bytes each in B,G,R,flag order.
 const LIGHT_SUB_READBACK = 3;
+// Same category, and (per the vendor bundle's own `ci` enum) the subcommand right next
+// to DirectDrive's - see loadCustomColors()/sendCustomPacket() below for what sets it
+// apart in practice.
+const LIGHT_SUB_CUSTOM = 4;
 // The official UI labels the firmware's effects L1..L23 and its own list is a plain
 // id 0..22 - no names, no gaps - so the mode byte is just the index. That list is shared
 // across every model though: THIS keyboard only uses the first 20 on the main LEDs and
@@ -816,6 +835,14 @@ function renderKeyboard() {
 
 async function toggleKey(row, col) {
   const rc = `${row}-${col}`;
+  // Paint mode is a different tool entirely - a click here is "set this key's colour
+  // now", not "select this key" - so it short-circuits before the selection model below
+  // even sees it, the same way it never touches `selected` at all.
+  if (customPaint && !document.getElementById('view-light').hidden) {
+    if (!customLoaded) await loadCustomColors();
+    paintCustomKey(rc, document.getElementById('customBrush').value);
+    return;
+  }
   if (selected.has(rc)) { selected.delete(rc); updateSelectionUI(); return; }
   // SOCD/RS bind exactly two keys, in pick order (A, then B). A key that is already half of
   // a saved pair brings its partner along, so clicking either end opens that pair to edit.
@@ -1347,6 +1374,7 @@ function resetDevice(msg) {
   configCount = 0; currentConfig = null; configNames.clear();
   lightState = null; palette = []; lightAreas = []; lightArea = AREA.Keyboard;
   lightStates = {}; stripLeds = 0; ledPreview(false);
+  customColors.clear(); customLoaded = false;
   codeLabel.clear();
   for (const k of Object.keys(layerCache)) delete layerCache[k];
   invalidateAdvanced();
@@ -2076,6 +2104,9 @@ function renderLighting() {
   btn.setAttribute('aria-pressed', st && st.open ? 'true' : 'false');
   btn.querySelector('.tog').textContent = st && st.open ? 'ON' : 'OFF';
   btn.disabled = !st;
+  document.getElementById('customPaintToggle').disabled = !device;
+  document.getElementById('customClear').disabled = !device;
+  document.getElementById('customBrush').disabled = !device;
 
   // One button per area, but only for areas the keyboard reported having.
   pickRow(document.getElementById('lightAreas'), lightAreas.length,
@@ -2321,6 +2352,89 @@ function ledPreview(on) {
   ledRunning = on;
   if (on) ledLoop();
 }
+
+// Per-key custom colours (Lighting, subcommand Custom=4): same 15-keys-per-packet
+// B,G,R,flag wire shape as DirectDrive, discovered by writing one key and reading the
+// live frame straight back - but where DirectDrive fades back to the running effect a
+// few seconds after the last frame, this one does not: a painted key was still showing
+// after 6+ seconds and again after a full reconnect, with no separate save packet ever
+// sent. flag=255 means the slot overrides the running effect with its own colour;
+// flag=0 lets the effect show through underneath - the mirror (ledLoop above) already
+// paints whatever is actually live, custom colours included, with no changes needed.
+// rc -> flat LED index only goes one way (ledIndex) - built once, lazily, since it can't
+// run before renderKeyboard() has populated ledIndex.
+let ledRcCache = null;
+const ledRcOf = idx => {
+  if (!ledRcCache) ledRcCache = new Map([...ledIndex].map(([rc, i]) => [i, rc]));
+  return ledRcCache.get(idx);
+};
+
+// rc -> {r,g,b} for every key currently holding a custom colour, loaded from the device
+// before the first paint. The wire format has no way to touch one slot - writing a key
+// means resending its whole 15-slot packet - so without this, painting one key would
+// silently blank any other key sharing its packet that already had a colour set.
+const customColors = new Map();
+let customLoaded = false;
+let customPaint = false;
+
+async function loadCustomColors() {
+  customColors.clear();
+  const n = ledPackets[AREA.Keyboard] || 0;
+  for (let p = 0; p < n; p++) {
+    const r = await sendAndWait([CATEGORY.Lighting, LIGHT_SUB_READBACK, AREA.Keyboard, p], 700, true);
+    if (!r) break;
+    for (let k = 0; k < 15; k++) {
+      const o = 4 + k * 4;
+      if (r[o + 3] !== 255) continue;
+      const rc = ledRcOf(p * 15 + k);
+      if (rc) customColors.set(rc, { b: r[o], g: r[o + 1], r: r[o + 2] });
+    }
+  }
+  customLoaded = true;
+}
+
+// Fire-and-forget, like DirectDrive's frames - no reply is expected to this subcommand.
+function sendCustomPacket(pktIdx) {
+  if (!device) return;
+  const body = [CATEGORY.Lighting, LIGHT_SUB_CUSTOM, AREA.Keyboard, pktIdx];
+  for (let k = 0; k < 15; k++) {
+    const rc = ledRcOf(pktIdx * 15 + k);
+    const c = rc && customColors.get(rc);
+    body.push(c ? c.b : 0, c ? c.g : 0, c ? c.r : 0, c ? 255 : 0);
+  }
+  while (body.length < 64) body.push(0);
+  device.sendReport(0, Uint8Array.from(body)).catch(err => log('Custom colour: ' + err.message));
+}
+
+function paintCustomKey(rc, hex) {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  customColors.set(rc, { r, g, b });
+  sendCustomPacket(Math.floor(ledIndex.get(rc) / 15));
+  saveState('Painted ' + keyLabelOf(rc));
+}
+
+// One "clear" for the whole board rather than a per-key eraser - matches the vendor's
+// own UI, which only ever offers a single clear-all action for this feature too.
+function clearAllCustom() {
+  customColors.clear();
+  const n = ledPackets[AREA.Keyboard] || 0;
+  for (let p = 0; p < n; p++) sendCustomPacket(p);
+  log('Lighting: cleared all custom key colours.');
+  saveState('Custom colours cleared');
+}
+
+document.getElementById('customPaintToggle').onclick = async () => {
+  customPaint = !customPaint;
+  const btn = document.getElementById('customPaintToggle');
+  btn.setAttribute('aria-pressed', customPaint ? 'true' : 'false');
+  btn.querySelector('.tog').textContent = customPaint ? 'ON' : 'OFF';
+  if (customPaint && !customLoaded) {
+    saveState('Reading custom colours...', true);
+    await loadCustomColors();
+    saveState('Custom colours loaded');
+  }
+};
+document.getElementById('customClear').onclick = clearAllCustom;
 
 // Served from GitHub Pages this is the deploy date, which is the only version number
 // worth having for a single file that updates itself on every visit.
@@ -3360,6 +3474,31 @@ function hkSingleConflict(rc, spec) {
   return `${keyLabelOf(rc)} already has a ${HK_NAMES[hk.type] || 'type ' + hk.type} binding - delete it first.`;
 }
 
+// Slider + typed box, synced - the same shape Performance's own numeric fields already
+// use (`.ctl`, reused as-is), rather than a bare number box. The user asked for this
+// specifically after seeing the vendor's own DKS/MPT screens use a slider too, though
+// theirs is one combined draggable timeline per stage; a per-stage slider is the same
+// idea in this app's plainer-but-clearer per-stage-row shape. Only settles (clamps,
+// fires onChange) on slider input or on the box's blur/enter - not on every keystroke,
+// so typing "0.05" doesn't get clamped mid-edit.
+function numCtl(min, max, step, value, disabled, onChange) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ctl';
+  const slider = document.createElement('input');
+  slider.type = 'range'; slider.min = min; slider.max = max; slider.step = step; slider.value = value; slider.disabled = disabled;
+  const box = document.createElement('input');
+  box.type = 'number'; box.min = min; box.max = max; box.step = step; box.value = value; box.disabled = disabled;
+  const settle = () => {
+    const v = Math.max(min, Math.min(max, Number(box.value) || 0));
+    slider.value = v; box.value = v; onChange(v);
+  };
+  slider.oninput = () => { box.value = slider.value; onChange(Number(slider.value)); };
+  box.oninput = () => { slider.value = box.value; };
+  box.onchange = settle;
+  wrap.append(slider, box);
+  return wrap;
+}
+
 // One row per stage: its name, the key it currently sends (click opens the compact
 // overlay picker), and - where this type gives the stage its own number - that number
 // right beside it. Mutates kcs/nums in place and repaints just the one row/field that
@@ -3386,13 +3525,7 @@ function renderHkStages(el, spec, kcs, nums, disabled) {
       const unit = document.createElement('span');
       unit.className = 'muted';
       unit.textContent = row.num.label;
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.min = row.num.min; input.max = row.num.max; input.step = row.num.step;
-      input.value = nums[n];
-      input.disabled = disabled;
-      input.onchange = () => { nums[n] = Math.max(row.num.min, Math.min(row.num.max, Number(input.value) || 0)); input.value = nums[n]; };
-      line.append(unit, input);
+      line.append(unit, numCtl(row.num.min, row.num.max, row.num.step, nums[n], disabled, v => { nums[n] = v; }));
     }
     el.appendChild(line);
   });
@@ -3408,15 +3541,8 @@ function renderHkExtra(el, spec, nums, disabled) {
     const n = base + i;
     const wrap = document.createElement('span');
     wrap.className = 'numfield';
-    const id = `hkextra_${spec.field}_${i}`;
-    wrap.innerHTML = `<label class="muted" for="${id}">${f.label}</label>`;
-    const input = document.createElement('input');
-    input.type = 'number'; input.id = id;
-    input.min = f.min; input.max = f.max; input.step = f.step;
-    input.value = nums[n];
-    input.disabled = disabled;
-    input.onchange = () => { nums[n] = Math.max(f.min, Math.min(f.max, Number(input.value) || 0)); input.value = nums[n]; };
-    wrap.appendChild(input);
+    wrap.innerHTML = `<label class="muted">${f.label}</label>`;
+    wrap.appendChild(numCtl(f.min, f.max, f.step, nums[n], disabled, v => { nums[n] = v; }));
     el.appendChild(wrap);
   });
 }
