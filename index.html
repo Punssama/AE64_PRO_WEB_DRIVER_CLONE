@@ -145,7 +145,7 @@
   #kb .kb-key.rt .tag { display: block; }
   /* Advanced keys: the chip names the binding (S1, S2... for SOCD pairs) instead, so the
      RT chip steps aside there rather than two meanings sharing one corner. */
-  #kb.adv .kb-key.rt .tag { display: none; }
+  #kb.adv .kb-key.rt:not(.advtag) .tag { display: none; }
   #kb .kb-key.advtag .tag { display: block; }
   /* Live travel fill, driven by the Travel test poll. Rises from the bottom of the cap. */
   #kb .kb-key .lvl { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--desk); }
@@ -220,17 +220,21 @@
   #view-remap .tabs { margin-bottom: 6px; }
   .kp { display: flex; gap: 9px; align-items: flex-start; }
   /* Seven feature tabs have to fit one row of the centre column; 150px each would not. */
-  #view-adv .tab { min-width: 0; padding: 5px 18px; }
+  #view-adv .tabs { margin-bottom: 3px; }
+  #view-adv .tab { min-width: 0; padding: 2px 14px; }
   .socd { display: flex; gap: 24px; align-items: flex-start; }
-  .socd-edit { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+  .socd-edit { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; line-height: 1.2; }
   .socd-edit .hint { margin: 0; }
   .socd-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .socd-row input[type=number] { width: 64px; padding: 3px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; text-align: right; }
+  .socd-row input[type=number] { width: 64px; padding: 2px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; text-align: right; }
+  /* Bind/Delete are secondary actions on an already-tight view, not the app's main call
+     to action, so they don't need the full button size everything else gets. */
+  .socd-edit .socd-row button { padding: 3px 11px; }
   .socd-list { flex: 0 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   #socdList { display: flex; flex-direction: column; gap: 4px; }
   #socdList button { text-align: left; padding: 4px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); }
   #socdList button.on, #socdList button.on:hover { background: var(--ink); color: var(--accent); }
-  .socd-list .hint, .socd-list .warn { margin: 0; }
+  .socd-list .hint, .socd-list .muted { margin: 0; }
   .kp-block { display: flex; flex-direction: column; gap: 2px; }
   .kp-row { display: flex; gap: 2px; }
   .kp-row button { height: var(--kph, 17px); min-width: 0; padding: 0; line-height: 1;
@@ -252,13 +256,13 @@
   .fields .field { margin-bottom: 0; }
   .readout { display: flex; gap: 22px; flex-wrap: wrap; align-items: baseline; }
   .readout b { font-weight: normal; font-size: 22px; }
-  .readout .muted { color: var(--muted); }
+  .muted { color: var(--muted); }
   .readout .ok { color: var(--ink); background: var(--desk); padding: 0 5px; }
   .readout .bad { color: var(--accent); background: var(--ink); padding: 0 5px; }
   #ttChecks { margin-top: 6px; }
   /* Calibration rewrites every key's stored axis data, so its screen is styled to be
      read before it is clicked, not after. */
-  .warn { border: 2px solid var(--ink); background: var(--accent); padding: 7px 10px; margin: 0 0 11px; }
+  .warn { border: 2px solid var(--ink); background: var(--accent); padding: 3px 8px; margin: 0 0 2px; }
   /* Button and status share a row: giving the status its own line pushed this view 8px
      past the 142px the centre panel has. */
   .calrow { display: flex; align-items: center; gap: 14px; }
@@ -274,6 +278,7 @@
   .pick { display: flex; gap: 4px; flex-wrap: wrap; }
   .pick button { padding: 3px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); min-width: 34px; }
   .pick button.on, .pick button.on:hover { background: var(--ink); color: var(--accent); }
+  #socdMode button { padding: 2px 7px; }
   .swatch { width: 26px; height: 26px; min-width: 0; padding: 0; box-shadow: none; }
   .swatch.on { outline: 3px solid var(--accent); outline-offset: -6px; }
   .danger { background: var(--accent); }
@@ -448,12 +453,13 @@
         <button class="tab" data-tab="rs" disabled title="Deeper press wins - not supported yet">RS</button>
       </div>
       <div class="tabpane" id="tab-socd">
+        <p class="warn">CS2 and other competitive games ban SOCD handling - using it there can get an account suspended.</p>
         <div class="socd">
           <div class="socd-edit">
             <p class="hint" id="socdHint">Connect the keyboard first.</p>
             <div class="socd-row readout">
-              <span><span class="muted">Key A</span> <b id="socdKeyA">--</b></span>
-              <span><span class="muted">Key B</span> <b id="socdKeyB">--</b></span>
+              <span><span class="muted">Key 1</span> <b id="socdKeyA">--</b></span>
+              <span><span class="muted">Key 2</span> <b id="socdKeyB">--</b></span>
               <label class="muted" for="socdDelay">Delay (ms)</label>
               <input id="socdDelay" type="number" min="0" max="100" step="1" value="0">
             </div>
@@ -465,8 +471,8 @@
             </div>
           </div>
           <div class="socd-list">
+            <p class="muted" id="socdListTitle">Saved pairs</p>
             <div id="socdList"></div>
-            <p class="warn">CS2 and other competitive games ban SOCD handling - using it there can get an account suspended.</p>
           </div>
         </div>
       </div>
@@ -2954,6 +2960,22 @@ if (location.search.includes('selftest')) {
   console.assert(eq(hkClearPacket('2-5'), [6, 2, 2, 5, 0]), 'clearing writes type 0');
   console.assert([0, 1, 2, 3].every(m => socdModeOf(SOCD_MODES[m][2]) === m) && socdModeOf(SOCD_MODES[1][3]) === 2,
                  'a mode reads back from either end of the pair');
+  // The RT chip and the S1/S2 chip share one corner of the keycap. A key that is both
+  // Rapid Trigger and part of a SOCD pair must show the SOCD chip - regression check for a
+  // CSS specificity bug where the RT-hides-tag rule outranked the advtag-shows-tag rule.
+  // Built detached rather than read from #kb, since renderKeyboard() runs after this block.
+  {
+    const kb = document.getElementById('kb');
+    const sample = document.createElement('div');
+    sample.className = 'kb-key';
+    sample.append(document.createElement('span'), document.createElement('span'),
+                  document.createElement('span'), Object.assign(document.createElement('span'), { className: 'tag' }));
+    kb.appendChild(sample);
+    kb.classList.add('adv'); sample.classList.add('rt', 'advtag');
+    console.assert(getComputedStyle(sample.children[3]).display === 'block',
+                   'a SOCD-paired key that is also Rapid Trigger must still show its chip');
+    kb.classList.remove('adv'); sample.remove();
+  }
   console.log('selftest done');
 }
 
