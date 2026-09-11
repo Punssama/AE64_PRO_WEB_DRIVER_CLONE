@@ -3239,10 +3239,20 @@ function endPacket(rc, kcs, nums) {
 }
 
 // ponytail: DKS's 4 "%" fields and END's "Delay" are read from the wire exactly as the
-// vendor sends them (DKS's trps are literally raw unscaled bytes, matching the vendor UI
-// copy's own "10%-90% rebound travel" framing for the sibling END feature) but neither has
-// been confirmed against a live depth reading the way Performance's trigger points were -
-// treat the units as a well-evidenced guess, not a verified fact, until tested on hardware.
+// vendor sends them, but neither field's real-world unit is independently confirmed -
+// treat both as a well-evidenced guess, not a verified fact, until tested on hardware:
+// - DKS trps are raw UNSCALED BYTES (0-255), not the LE16 x1000 mm every other depth
+//   field on this device uses. Public guides for DKS on OTHER Hall-effect keyboards
+//   (e.g. glacierpcgaming.com) describe it as absolute mm (0.1-4.0mm) - but a single
+//   raw byte cannot hold this board's own 3.39mm max travel at that resolution (x100
+//   would need up to ~340), so THIS firmware's encoding cannot be that scheme. A
+//   percentage of travel fits a byte cleanly, works for any board regardless of its
+//   own max travel, and matches the vendor's own "10%-90% rebound travel" copy for
+//   the sibling END feature - the best-supported guess, not a confirmed one.
+// - END's own vendor UI copy describes the feature as an adjustable "trigger point"
+//   (10%-90% rebound travel), but the vendor's OWN source code names this exact wire
+//   field `delay` - which of "position" or "time" it actually is is unresolved even
+//   after checking (no public source on END/"End Trigger" under any name was found).
 const HK_SINGLE_SPECS = {
   dks: {
     type: HK_TYPE.DKS, field: 'dks', label: 'DKS',
