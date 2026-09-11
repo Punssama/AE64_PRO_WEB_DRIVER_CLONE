@@ -532,6 +532,7 @@ const selected = new Set();
 // This is what puts the RT tag on a key; it is only ever set from a real device read.
 const keyMode = new Map();
 const keyEl = new Map();
+const keyLvlEl = new Map(); // rc -> its .lvl fill bar, cached so travel/calibration paints skip querySelector
 const ledIndex = new Map(); // rc -> slot in the firmware's flattened 6x21 LED grid
 
 function setKeyMode(rc, mode) {
@@ -567,6 +568,7 @@ function renderKeyboard() {
       Object.assign(document.createElement('span'), { className: 'tag', textContent: 'RT' }),
     );
     keyEl.set(rc, btn);
+    keyLvlEl.set(rc, btn.children[1]); // .lvl - see the append() order above
     ledIndex.set(rc, row * 21 + col);
     btn.style.left = ((x - KB_MINX) * KB_SCALE + 6) + 'px';
     btn.style.top = ((y - KB_MINY) * KB_SCALE + 6) + 'px';
@@ -924,10 +926,13 @@ async function useDevice(d) {
   updateKbVisibility();
   log(`Connected to ${device.productName} (vid=0x${device.vendorId.toString(16)} pid=0x${device.productId.toString(16)})`);
   if (!document.getElementById('view-traveltest').hidden) setTravelTest(true);
+  // Rate first, before the 64-key loop below: it used to sit after loadAllModes(), so the
+  // UI kept showing the old/default rate for as long as that ~64-round-trip read took
+  // (visibly seconds) even though the read itself was correct once it finally ran.
+  await readRate();
   await fillFormFrom(selected.values().next().value);
   await loadAllModes();
   await loadLighting();
-  await readRate();
   // Layer 0 explicitly, not whatever `remapLayer` happens to be left over from a prior
   // session (e.g. the Functions tab was open when the keyboard disconnected) - the board
   // outside the Remap view always wants the base layer. The Fn layer is read lazily by
@@ -1372,20 +1377,54 @@ function renderTT(route) {
 }
 
 function clearTravelPaint() {
-  for (const el of keyEl.values()) el.querySelector('.lvl').style.height = '0%';
+  for (const el of keyLvlEl.values()) el.style.height = '0%';
   const live = document.getElementById('liveMark');
   if (live) live.hidden = true;
 }
 
 function paintKeyFill(rc, raw) {
-  const el = keyEl.get(rc);
+  const el = keyLvlEl.get(rc);
   if (!el) return;
   const full = keyTravel.get(rc) || 3390;
-  el.querySelector('.lvl').style.height = Math.max(0, Math.min(100, (raw / full) * 100)) + '%';
+  el.style.height = Math.max(0, Math.min(100, (raw / full) * 100)) + '%';
 }
 
 function paintTravelRow(row, data) {
   for (let col = 0; col < data.length; col++) paintKeyFill(`${row}-${col}`, data[col]);
+}
+
+// Reading and painting are decoupled on purpose: feedTT() runs on every single sample,
+// unthrottled, because the sample rate on the watched key is what decides how tightly the
+// switching point can be pinned down. But painting that same sample (21 fill bars, the
+// live marker, the readout text) doesn't need to happen any faster than the screen can
+// show it - doing it on every sample too was pegging the main thread and made the rest of
+// the board's fill bars (repainted every 10th pass) visibly stutter. rAF-gate the paint,
+// not the read: it applies whatever the latest sample was once per frame.
+let travelPaintPending = false, pendingWatched = null, pendingOther = null;
+function scheduleTravelPaint() {
+  if (travelPaintPending) return;
+  travelPaintPending = true;
+  requestAnimationFrame(() => {
+    travelPaintPending = false;
+    if (!travelRunning) return; // a queued frame must not repaint after clearTravelPaint()
+    if (pendingWatched) {
+      const { row, data, rc, route } = pendingWatched;
+      pendingWatched = null;
+      paintTravelRow(row, data);
+      renderTT(route);
+      const live = document.getElementById('liveMark');
+      if (live) {
+        const full = keyTravel.get(rc) || 3390;
+        live.hidden = false;
+        live.style.top = Math.max(0, Math.min(100, (route / full) * 100)) + '%';
+        live.querySelector('span').textContent = 'now ' + MM(route);
+      }
+    }
+    if (pendingOther) {
+      paintTravelRow(pendingOther.row, pendingOther.data);
+      pendingOther = null;
+    }
+  });
 }
 
 // The watched key's row is read every pass (travel AND status, so edges are caught with
@@ -1402,23 +1441,16 @@ async function travelLoop() {
         const ks = await getAxisRow(AXIS_MODE.KeyStatus, row, 300);
         const rt = await getAxisRow(AXIS_MODE.Route, row, 300);
         if (rt && ks) {
-          paintTravelRow(row, rt.data);
           feedTT(rt.data[col], ks.data[col]);
-          renderTT(rt.data[col]);
-          const live = document.getElementById('liveMark');
-          if (live) {
-            const full = keyTravel.get(rc) || 3390;
-            live.hidden = false;
-            live.style.top = Math.max(0, Math.min(100, (rt.data[col] / full) * 100)) + '%';
-            live.querySelector('span').textContent = 'now ' + MM(rt.data[col]);
-          }
+          pendingWatched = { row, data: rt.data, rc, route: rt.data[col] };
+          scheduleTravelPaint();
         }
         // Other rows only every 10th pass: sample rate on the watched key is what
         // decides how tightly the switching point can be pinned down.
         const other = KB_ROWS[(rrRow++ / 10 | 0) % KB_ROWS.length];
         if (rrRow % 10 === 0 && other !== row) {
           const o = await getAxisRow(AXIS_MODE.Route, other, 300);
-          if (o) paintTravelRow(other, o.data);
+          if (o) { pendingOther = { row: other, data: o.data }; scheduleTravelPaint(); }
         }
       } else {
         renderTT(0);
@@ -1468,7 +1500,7 @@ async function pollCalibrationProgress() {
           const el = keyEl.get(rc);
           if (!el) continue;
           const full = keyTravel.get(rc) || 3390;
-          el.querySelector('.lvl').style.height = Math.max(0, Math.min(100, (r.data[col] / full) * 100)) + '%';
+          keyLvlEl.get(rc).style.height = Math.max(0, Math.min(100, (r.data[col] / full) * 100)) + '%';
           // Counts as learned once it has actually reached the bottom of its travel -
           // a light tap is not what calibration needs.
           if (r.data[col] >= full * 0.9) {
