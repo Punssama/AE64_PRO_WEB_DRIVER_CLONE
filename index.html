@@ -441,7 +441,7 @@
     </div>
 
     <!-- The vendor's Advanced Key page holds these seven, one binding per physical key.
-         Only SOCD is wired up; the rest stay visible so where they will go is not a surprise. -->
+         SOCD and RS are wired up; the rest stay visible so where they will go is not a surprise. -->
     <div class="view" id="view-adv" hidden>
       <div class="tabs">
         <button class="tab active" data-tab="socd">SOCD</button>
@@ -450,7 +450,7 @@
         <button class="tab" data-tab="mt" disabled title="Tap / hold - not supported yet">MT</button>
         <button class="tab" data-tab="tgl" disabled title="Toggle - not supported yet">TGL</button>
         <button class="tab" data-tab="end" disabled title="Fire on release - not supported yet">END</button>
-        <button class="tab" data-tab="rs" disabled title="Deeper press wins - not supported yet">RS</button>
+        <button class="tab" data-tab="rs" title="Rapid Snap: whichever of the two keys is pressed deeper wins">RS</button>
       </div>
       <div class="tabpane" id="tab-socd">
         <p class="warn">CS2 and other competitive games ban SOCD handling - using it there can get an account suspended.</p>
@@ -473,6 +473,28 @@
           <div class="socd-list">
             <p class="muted" id="socdListTitle">Saved pairs</p>
             <div id="socdList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpane" id="tab-rs" hidden>
+        <div class="socd">
+          <div class="socd-edit">
+            <p class="hint" id="rsHint">Connect the keyboard first.</p>
+            <div class="socd-row readout">
+              <span><span class="muted">Key 1</span> <b id="rsKeyA">--</b></span>
+              <span><span class="muted">Key 2</span> <b id="rsKeyB">--</b></span>
+              <label class="muted" for="rsDelay">Delay (ms)</label>
+              <input id="rsDelay" type="number" min="0" max="100" step="1" value="0">
+            </div>
+            <div class="socd-row">
+              <button id="rsBind" disabled>Bind pair</button>
+              <button id="rsDelete" disabled>Delete pair</button>
+              <span class="hint" id="rsTry">Held now: nothing</span>
+            </div>
+          </div>
+          <div class="socd-list">
+            <p class="muted" id="rsListTitle">Saved pairs</p>
+            <div id="rsList"></div>
           </div>
         </div>
       </div>
@@ -672,11 +694,12 @@ function renderKeyboard() {
 async function toggleKey(row, col) {
   const rc = `${row}-${col}`;
   if (selected.has(rc)) { selected.delete(rc); updateSelectionUI(); return; }
-  // SOCD binds exactly two keys, in pick order (A, then B). A key that is already half of
+  // SOCD/RS bind exactly two keys, in pick order (A, then B). A key that is already half of
   // a saved pair brings its partner along, so clicking either end opens that pair to edit.
   if (!document.getElementById('view-adv').hidden) {
-    const saved = socdPairs().find(p => p.a === rc || p.b === rc);
-    if (saved) { selectSocdPair(saved); return; }
+    const saved = advTab() === 'rs' ? rsPairs().find(p => p.a === rc || p.b === rc)
+                                     : socdPairs().find(p => p.a === rc || p.b === rc);
+    if (saved) { (advTab() === 'rs' ? selectRsPair : selectSocdPair)(saved); return; }
     if (selected.size >= 2) selected.clear();
     selected.add(rc);
     updateSelectionUI();
@@ -780,6 +803,14 @@ for (const t of document.querySelectorAll('#view-remap .tab')) {
   t.addEventListener('click', () => setRemapLayer(t.dataset.tab === 'rf' ? 1 : 0));
 }
 
+// Same reasoning: switching the SOCD/RS sub-tab can reveal a pane last rendered against
+// whatever was selected while the OTHER sub-tab was open - refresh both on every switch,
+// the same call the view-switcher itself makes when Advanced keys is opened fresh. Defined
+// for every tab in the strip, not just socd/rs, so a later type gets this for free too.
+for (const t of document.querySelectorAll('#view-adv .tab')) {
+  t.addEventListener('click', () => { renderSocd(); renderRs(); });
+}
+
 
 function updateSelectionUI() {
   document.querySelectorAll('#kb .kb-key').forEach(el => {
@@ -798,7 +829,7 @@ function updateSelectionUI() {
   updateEnabled();
   // Remapping follows the same key picker, so it has to redraw when the picking changes.
   if (!document.getElementById('view-remap').hidden) renderRemap();
-  if (!document.getElementById('view-adv').hidden) renderSocd();
+  if (!document.getElementById('view-adv').hidden) (advTab() === 'rs' ? renderRs : renderSocd)();
 }
 
 // The gauge draws the key's real travel, read from the device (axisRangeMax).
@@ -888,6 +919,7 @@ for (const btn of document.querySelectorAll('.navbtn')) {
     }
     if (btn.dataset.view === 'adv') {
       renderSocd();
+      renderRs();
       if (device && !advCache) loadAdvancedKeys();
     }
     socdListen(btn.dataset.view === 'adv');
@@ -2597,6 +2629,9 @@ const HK_NAMES = ['None', 'DKS', 'MPT', 'MT', 'TGL', 'END', 'SOCD', 'RS'];
 const rcOf = rc => rc.split('-').map(Number);
 const keyLabelOf = rc => KEY_LABEL.get(rc) || rc;
 const layoutIndex = new Map(KEY_LAYOUT.map(([rc], i) => [rc, i]));
+// Which Advanced-keys sub-tab is open, so the shared key picker can route a click to the
+// right feature's pair-picking logic.
+const advTab = () => document.querySelector('#view-adv .tab.active')?.dataset.tab;
 
 function socdPackets(a, b, kcA, kcB, delay, mode) {
   const [, , sA, sB] = SOCD_MODES[mode];
@@ -2604,6 +2639,16 @@ function socdPackets(a, b, kcA, kcB, delay, mode) {
   return [
     [...head(a), b[0], b[1], ...u16le16bit(kcA), ...u16le16bit(kcB), ...u16le16bit(delay), sA],
     [...head(b), a[0], a[1], ...u16le16bit(kcB), ...u16le16bit(kcA), ...u16le16bit(delay), sB],
+  ];
+}
+
+// Same shape as SOCD minus the priority byte - RS has no mode to pick, the firmware just
+// always outputs whichever key is pressed deeper (and both, if both are fully bottomed out).
+function rsPackets(a, b, kcA, kcB, delay) {
+  const head = ([r, c]) => [CATEGORY.HigherKey, HK_SUB.Write, r, c, HK_TYPE.RS];
+  return [
+    [...head(a), b[0], b[1], ...u16le16bit(kcA), ...u16le16bit(kcB), ...u16le16bit(delay)],
+    [...head(b), a[0], a[1], ...u16le16bit(kcB), ...u16le16bit(kcA), ...u16le16bit(delay)],
   ];
 }
 
@@ -2615,6 +2660,9 @@ function parseHigherKey(t) {
   if (t[4] === HK_TYPE.SOCD) {
     hk.socd = { row2: t[5], col2: t[6], kcOwn: t[7] | t[8] << 8, kcPartner: t[9] | t[10] << 8,
                 delay: t[11] | t[12] << 8, sByte: t[13] };
+  } else if (t[4] === HK_TYPE.RS) {
+    hk.rs = { row2: t[5], col2: t[6], kcOwn: t[7] | t[8] << 8, kcPartner: t[9] | t[10] << 8,
+              delay: t[11] | t[12] << 8 };
   }
   return hk;
 }
@@ -2649,6 +2697,19 @@ function socdPairs() {
   return pairs;
 }
 
+// Same idea as socdPairs(), for the mode-less RS binding.
+function rsPairs() {
+  const pairs = [];
+  if (!advCache) return pairs;
+  for (const [rc, hk] of advCache) {
+    if (!hk.rs) continue;
+    const partner = `${hk.rs.row2}-${hk.rs.col2}`;
+    if (advCache.get(partner)?.rs && layoutIndex.get(rc) > layoutIndex.get(partner)) continue;
+    pairs.push({ a: rc, b: partner, delay: hk.rs.delay });
+  }
+  return pairs;
+}
+
 // Binding state belongs to whatever config is active, so a config switch or a disconnect
 // makes all of it stale at once.
 function invalidateAdvanced() {
@@ -2657,7 +2718,7 @@ function invalidateAdvanced() {
   advLoading = false;
   advUnsupported = false;
   if (device && !document.getElementById('view-adv').hidden) loadAdvancedKeys();
-  else { renderSocd(); paintAdvTags(); }
+  else { renderSocd(); renderRs(); paintAdvTags(); }
 }
 
 async function loadAdvancedKeys() {
@@ -2666,6 +2727,7 @@ async function loadAdvancedKeys() {
   advLoading = true;
   advUnsupported = false;
   renderSocd();
+  renderRs();
   const map = new Map();
   for (const [rc] of KEY_LAYOUT) {
     if (gen !== advGen || !device) return;   // superseded by a config switch or a disconnect
@@ -2680,16 +2742,18 @@ async function loadAdvancedKeys() {
       advUnsupported = true;
       log('Advanced keys: no answer to the first read - this firmware may not support them.');
       renderSocd();
+      renderRs();
       return;
     }
   }
   if (gen !== advGen) return;
   advCache = map;
   advLoading = false;
-  const other = [...map.values()].filter(hk => hk.type !== HK_TYPE.None && hk.type !== HK_TYPE.SOCD).length;
-  log(`Advanced keys (${configLabel(currentConfig)}): ${socdPairs().length} SOCD pair(s), ${other} other binding(s), ` +
-      `${KEY_LAYOUT.length - map.size} key(s) unread.`);
+  const other = [...map.values()].filter(hk => hk.type !== HK_TYPE.None && hk.type !== HK_TYPE.SOCD && hk.type !== HK_TYPE.RS).length;
+  log(`Advanced keys (${configLabel(currentConfig)}): ${socdPairs().length} SOCD pair(s), ${rsPairs().length} RS pair(s), ` +
+      `${other} other binding(s), ${KEY_LAYOUT.length - map.size} key(s) unread.`);
   renderSocd();
+  renderRs();
   paintAdvTags();
 }
 
@@ -2844,6 +2908,139 @@ async function deleteSocd() {
 document.getElementById('socdBind').onclick = bindSocd;
 document.getElementById('socdDelete').onclick = deleteSocd;
 
+// RS ("Rapid Snap"): same pairing idea as SOCD, but the firmware has no mode to pick -
+// whichever of the two keys is pressed deeper always wins, and both fire if both are fully
+// bottomed out. Kept as its own set of functions rather than folded into the SOCD ones so a
+// change here can't regress the SOCD path, which is already verified on hardware.
+const rsSelection = () => (selected.size === 2 ? [...selected] : null);
+
+function rsConflict([a, b]) {
+  for (const [rc, other] of [[a, b], [b, a]]) {
+    const hk = advCache.get(rc);
+    if (!hk) return `${keyLabelOf(rc)} could not be read - reopen this view to retry.`;
+    if (hk.type === HK_TYPE.None) continue;
+    if (hk.rs) {
+      const partner = `${hk.rs.row2}-${hk.rs.col2}`;
+      if (partner === other) continue;
+      return `${keyLabelOf(rc)} is already paired with ${keyLabelOf(partner)} - delete that pair first.`;
+    }
+    return `${keyLabelOf(rc)} already has a ${HK_NAMES[hk.type] || 'type ' + hk.type} binding, which cannot be edited here yet.`;
+  }
+  return '';
+}
+
+function selectRsPair(p) {
+  document.getElementById('rsDelay').value = p.delay;
+  setSelection([p.a, p.b]);
+}
+
+function renderRs() {
+  const pair = rsSelection();
+  const ready = !!(device && advCache);
+  const conflict = ready && pair ? rsConflict(pair) : '';
+  const saved = ready && pair ? rsPairs().find(p => (p.a === pair[0] && p.b === pair[1]) || (p.a === pair[1] && p.b === pair[0])) : null;
+  const canEdit = !!(ready && pair && !conflict);
+
+  document.getElementById('rsHint').textContent =
+    !device ? 'Connect the keyboard first.' :
+    advUnsupported ? 'This firmware does not answer advanced-key reads.' :
+    advLoading || !advCache ? 'Reading advanced keys...' :
+    !pair ? (selected.size > 2 ? 'Pick exactly two keys - RS is a pair.'
+                               : 'Pick two opposite keys on the board (A and D, W and S). Whichever is pressed deeper wins.') :
+    conflict || (saved ? 'Editing a saved pair - change it and Update, or Delete it.' : 'Set a delay, then Bind.');
+  document.getElementById('rsKeyA').textContent = pair ? keyLabelOf(pair[0]) : '--';
+  document.getElementById('rsKeyB').textContent = pair ? keyLabelOf(pair[1]) : '--';
+  document.getElementById('rsDelay').disabled = !canEdit;
+  const bind = document.getElementById('rsBind');
+  bind.textContent = saved ? 'Update pair' : 'Bind pair';
+  bind.disabled = !canEdit;
+  document.getElementById('rsDelete').disabled = !(ready && saved);
+
+  const list = document.getElementById('rsList');
+  list.innerHTML = '';
+  if (!ready) return;
+  const pairs = rsPairs();
+  if (!pairs.length) {
+    list.innerHTML = '<p class="hint">No RS pairs on this config.</p>';
+    return;
+  }
+  for (const p of pairs) {
+    const b = document.createElement('button');
+    b.textContent = `${keyLabelOf(p.a)} + ${keyLabelOf(p.b)} · ${p.delay} ms`;
+    if (saved && saved.a === p.a) b.className = 'on';
+    b.onclick = () => selectRsPair(p);
+    list.appendChild(b);
+  }
+}
+
+async function bindRs() {
+  const pair = rsSelection();
+  if (!device || !advCache || !pair) return;
+  const conflict = rsConflict(pair);
+  if (conflict) { log('RS: ' + conflict); saveState('RS refused', true); return; }
+  // Same capture-at-bind-time caveat as SOCD: a later remap of either key does not follow
+  // into the pair.
+  if (!layerCur(0)) { if (await loadKeymap(0)) await refreshKeymap(0); }
+  const cur = layerCur(0);
+  const [a, b] = pair.map(rcOf);
+  const kcA = cur?.[a[0]]?.[a[1]], kcB = cur?.[b[0]]?.[b[1]];
+  if (!kcA || !kcB) {
+    log(`RS: could not tell what ${keyLabelOf(pair[kcA ? 1 : 0])} sends (unread or silenced) - nothing written.`);
+    saveState('RS refused', true);
+    return;
+  }
+  const delay = Math.max(0, Math.min(SOCD_DELAY_MAX, Math.round(Number(document.getElementById('rsDelay').value) || 0)));
+  saveState('Saving...', true);
+  for (const p of rsPackets(a, b, kcA, kcB, delay)) {
+    if (!await sendAndWait(p, 500)) {
+      log('RS: no answer to the write.');
+      saveState('RS failed', true);
+      await rereadKeys(pair);
+      renderRs();
+      paintAdvTags();
+      return;
+    }
+  }
+  // The echo only proves the packet arrived - read both keys back and compare field by field.
+  const after = await rereadKeys(pair);
+  const want = [[b, kcA, kcB], [a, kcB, kcA]];
+  const ok = after.every((hk, i) => {
+    const s = hk?.rs, [p, own, partner] = want[i];
+    return !!s && s.row2 === p[0] && s.col2 === p[1] && s.kcOwn === own && s.kcPartner === partner && s.delay === delay;
+  });
+  const what = `${keyLabelOf(pair[0])} + ${keyLabelOf(pair[1])}, ${delay} ms`;
+  if (ok) {
+    log('RS bound: ' + what);
+    saveState('RS bound');
+    setSelection([]);
+  } else {
+    log(`RS REJECTED (${what}) - keyboard holds ${JSON.stringify(after)}`);
+    saveState('RS refused', true);
+  }
+  renderRs();
+  paintAdvTags();
+}
+
+async function deleteRs() {
+  const pair = rsSelection();
+  if (!device || !advCache || !pair) return;
+  const saved = rsPairs().find(p => pair.includes(p.a) && pair.includes(p.b));
+  if (!saved) return;
+  saveState('Saving...', true);
+  for (const rc of pair) await sendAndWait(hkClearPacket(rc), 500);
+  const after = await rereadKeys(pair);
+  const ok = after.every(hk => hk && hk.type === HK_TYPE.None);
+  const what = `${keyLabelOf(saved.a)} + ${keyLabelOf(saved.b)} (was ${saved.delay} ms)`;
+  log(ok ? 'RS deleted: ' + what : `RS delete REJECTED: ${what} - keyboard holds ${JSON.stringify(after)}`);
+  saveState(ok ? 'RS deleted' : 'Delete refused', !ok);
+  if (ok) setSelection([]);
+  renderRs();
+  paintAdvTags();
+}
+
+document.getElementById('rsBind').onclick = bindRs;
+document.getElementById('rsDelete').onclick = deleteRs;
+
 // S1, S2... on both keys of each pair, and the feature name on keys bound to something else.
 function paintAdvTags() {
   const on = !document.getElementById('view-adv').hidden;
@@ -2856,8 +3053,14 @@ function paintAdvTags() {
       tags.set(p.a, [chip, tip]);
       tags.set(p.b, [chip, tip]);
     });
+    rsPairs().forEach((p, i) => {
+      const chip = 'R' + (i + 1);
+      const tip = `RS ${keyLabelOf(p.a)} + ${keyLabelOf(p.b)}: deeper press wins`;
+      tags.set(p.a, [chip, tip]);
+      tags.set(p.b, [chip, tip]);
+    });
     for (const [rc, hk] of advCache) {
-      if (hk.type !== HK_TYPE.None && hk.type !== HK_TYPE.SOCD) {
+      if (hk.type !== HK_TYPE.None && hk.type !== HK_TYPE.SOCD && hk.type !== HK_TYPE.RS) {
         const name = HK_NAMES[hk.type] || '?';
         tags.set(rc, [name, name + ' binding (not editable here yet)']);
       }
@@ -2878,8 +3081,9 @@ function paintAdvTags() {
 const socdHeld = new Set();
 let socdListening = false;
 function renderHeld() {
-  document.getElementById('socdTry').textContent =
-    'Held now: ' + ([...socdHeld].map(c => c.replace(/^(Key|Digit)/, '')).join(' + ') || 'nothing');
+  const text = 'Held now: ' + ([...socdHeld].map(c => c.replace(/^(Key|Digit)/, '')).join(' + ') || 'nothing');
+  document.getElementById('socdTry').textContent = text;
+  document.getElementById('rsTry').textContent = text;
 }
 function onSocdKey(e) {
   if (e.repeat) return;
@@ -2960,6 +3164,17 @@ if (location.search.includes('selftest')) {
   console.assert(eq(hkClearPacket('2-5'), [6, 2, 2, 5, 0]), 'clearing writes type 0');
   console.assert([0, 1, 2, 3].every(m => socdModeOf(SOCD_MODES[m][2]) === m) && socdModeOf(SOCD_MODES[1][3]) === 2,
                  'a mode reads back from either end of the pair');
+  // RS is the same two-mirrored-packets shape as SOCD, minus the trailing mode byte - the
+  // detail most likely to get copy-pasted wrong.
+  const [rsA, rsB] = rsPackets([3, 1], [3, 3], 4, 7, 0);
+  console.assert(eq(rsA, [6, 2, 3, 1, 7, 3, 3, 4, 0, 7, 0, 0, 0]), 'RS packet for key A');
+  console.assert(eq(rsB, [6, 2, 3, 3, 7, 3, 1, 7, 0, 4, 0, 0, 0]), 'RS packet for key B mirrors A');
+  console.assert(rsA.length === 13, 'RS carries no mode byte, so it is one byte shorter than SOCD');
+  console.assert(eq(rsPackets([3, 1], [3, 3], 4, 7, 300)[0].slice(11), [44, 1]), 'RS delay is LE16 too');
+  console.assert(eq(parseHigherKey(rsA).rs, { row2: 3, col2: 3, kcOwn: 4, kcPartner: 7, delay: 0 }),
+                 'a written RS packet parses back');
+  console.assert(parseHigherKey(rsA).socd === undefined, 'an RS packet does not also parse as SOCD');
+  console.assert(parseHigherKey([6, 1, 2, 5, 0]).rs === undefined, 'an unbound key carries no RS data');
   // The RT chip and the S1/S2 chip share one corner of the keycap. A key that is both
   // Rapid Trigger and part of a SOCD pair must show the SOCD chip - regression check for a
   // CSS specificity bug where the RT-hides-tag rule outranked the advtag-shows-tag rule.
@@ -2987,6 +3202,7 @@ renderLighting();
 renderRates();
 renderRemap();
 renderSocd();
+renderRs();
 </script>
 </body>
 </html>
