@@ -614,6 +614,9 @@ async function fillFormFrom(rc) {
   const cur = await getPerformanceRaw(row, col);
   if (!cur) { log(`row=${row} col=${col}: no response, form unchanged`); return; }
   setKeyMode(rc, cur.mode);
+  // Same field loadAllModes() also caches per key - reading it here keeps keyTravel current
+  // for whichever key was just looked at, not just the ones that 64-key scan has reached.
+  if (cur.axisRangeMax > 0) keyTravel.set(rc, cur.axisRangeMax);
   fillCfg(cur);
 }
 
@@ -1369,6 +1372,9 @@ function renderTT(route) {
   if (!rc) {
     document.getElementById('ttNow').innerHTML = '<span class="muted">No key selected.</span>';
     document.getElementById('ttChecks').innerHTML = '';
+    // Otherwise this would sit on whatever the watched key's last hint was (say, a dead-zone
+    // warning) instead of pointing at the thing that actually needs doing next.
+    document.getElementById('ttHint').textContent = 'Select a key to run the travel test.';
     return;
   }
   const rtOn = rtMode === 1;
@@ -1412,10 +1418,6 @@ function paintKeyFill(rc, raw) {
   el.style.height = Math.max(0, Math.min(100, (raw / full) * 100)) + '%';
 }
 
-function paintTravelRow(row, data) {
-  for (let col = 0; col < data.length; col++) paintKeyFill(`${row}-${col}`, data[col]);
-}
-
 // Reading and painting are decoupled on purpose: feedTT() runs on every single sample,
 // unthrottled, because the sample rate on the watched key is what decides how tightly the
 // switching point can be pinned down. But painting that same sample (the live marker, the
@@ -1443,12 +1445,9 @@ function scheduleTravelPaint() {
   });
 }
 
-// While a key is watched, it is the ONLY key painted - not its row, not the rest of the
-// board. Earlier this still painted the whole watched row (paintTravelRow(row, data) loops
-// every column), so a same-row key showed fill when pressed even though nothing was asked
-// to watch it; fixed by painting just that one key's own value. Nothing else gets read or
-// touched until either a different key is picked (board is cleared first) or the selection
-// is dropped entirely, which is when the sweep below resumes.
+// Like most vendor tools, this view does nothing until a key is picked - no idle sweep of
+// the whole board. A key is the ONLY thing painted too, never its row or anyone else's:
+// this loop only ever touches the one rc it is currently watching.
 let travelRunning = false;
 async function travelLoop() {
   while (travelRunning) {
@@ -1457,17 +1456,16 @@ async function travelLoop() {
       if (rc !== tt.rc) {
         resetTT(rc);
         pendingWatched = null; // drop any not-yet-painted sample from whatever key this replaces
+        clearTravelPaint();
         if (rc) {
-          clearTravelPaint();
-          // loadAllModes() is what normally fills this in, but it walks all 64 keys on its
-          // own schedule and may not have reached this one yet - without its own scale, the
-          // fill falls back to a guessed constant and shows the wrong depth. One read fixes
-          // it for this key specifically instead of waiting on the other 63.
-          if (!keyTravel.has(rc)) {
-            const [r, c] = rc.split('-').map(Number);
-            const cal = await getPerformanceRaw(r, c, 300);
-            if (cal && cal.axisRangeMax > 0) keyTravel.set(rc, cal.axisRangeMax);
-          }
+          // fillFormFrom() both caches keyTravel (paintKeyFill's scale) and repopulates the
+          // Settings sliders renderTT()'s "Fires at" comparison reads - picking a key here
+          // never runs it otherwise, so without this the comparison silently checked against
+          // whatever key's numbers happened to be in the form last (often just the 1.0mm/etc
+          // HTML defaults, never touched at all).
+          await fillFormFrom(rc);
+        } else {
+          renderTT(0); // "No key selected" + the hint, once on the transition - nothing to repeat
         }
       }
       if (rc) {
@@ -1481,16 +1479,9 @@ async function travelLoop() {
           pendingWatched = { rc, route: rt.data[col] };
           scheduleTravelPaint();
         }
-      } else {
-        renderTT(0);
-        for (const row of KB_ROWS) {
-          if (!travelRunning) break;
-          const r = await getAxisRow(AXIS_MODE.Route, row, 300, true);
-          if (r) paintTravelRow(row, r.data);
-        }
       }
     }
-    await new Promise(r => setTimeout(r, tt.rc ? 0 : 8));
+    await new Promise(r => setTimeout(r, tt.rc ? 0 : 100));
   }
   clearTravelPaint();
 }
@@ -1501,6 +1492,10 @@ function setTravelTest(on) {
   if (on) {
     if (!device) { log('Travel test: not connected.'); travelRunning = false; return; }
     log('Travel test started.');
+    // travelLoop() only (re)renders the hint on a change from the last time it ran - opening
+    // this view with nothing selected and tt.rc already null (nothing to change from) would
+    // otherwise leave ttNow/ttHint showing whatever the static markup happened to have.
+    if (!selected.size) renderTT(0);
     travelLoop();
   } else {
     log('Travel test stopped.');
