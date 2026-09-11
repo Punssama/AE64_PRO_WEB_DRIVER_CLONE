@@ -827,10 +827,18 @@ function fitLog() {
   if (line > 0 && avail > line) logEl.style.height = (Math.floor(avail / line) * line + pad) + 'px';
   scrollLogToEnd();
 }
+let resizePending = false;
 addEventListener('resize', () => {
-  if (!document.getElementById('view-log').hidden) fitLog();
-  // The picker is sized from the panel it sits in, so a resized window has to redraw it.
-  if (!document.getElementById('view-remap').hidden) renderRemap();
+  // A dragged window edge fires many resize events per frame; rAF-gate so the expensive
+  // work (rebuilding ~100 picker buttons) runs at most once per repaint, not once per event.
+  if (resizePending) return;
+  resizePending = true;
+  requestAnimationFrame(() => {
+    resizePending = false;
+    if (!document.getElementById('view-log').hidden) fitLog();
+    // The picker is sized from the panel it sits in, so a resized window has to redraw it.
+    if (!document.getElementById('view-remap').hidden) renderRemap();
+  });
 });
 
 function build64(bytes) {
@@ -917,6 +925,13 @@ async function useDevice(d) {
   await fillFormFrom(selected.values().next().value);
   await loadAllModes();
   await loadLighting();
+  await readRate();
+  // Layer 0 explicitly, not whatever `remapLayer` happens to be left over from a prior
+  // session (e.g. the Functions tab was open when the keyboard disconnected) - the board
+  // outside the Remap view always wants the base layer. The Fn layer is read lazily by
+  // setRemapLayer() the first time the Functions tab opens.
+  if (await loadKeymap(0)) await refreshKeymap(0);
+  paintCaps();
   return true;
 }
 
@@ -1104,10 +1119,12 @@ function renderRates() {
   });
 }
 
-document.getElementById('getRate').onclick = async () => {
+async function readRate() {
   const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Read]);
   if (res) { rateSel = res[3]; renderRates(); log('Polling rate value = ' + res[3]); }
-};
+  return !!res;
+}
+document.getElementById('getRate').onclick = readRate;
 
 document.getElementById('setRate').onclick = async () => {
   const rate = rateSel;
@@ -1951,8 +1968,7 @@ const SPECIAL_CODES = [
 ];
 const SPECIAL_BY_CODE = new Map(SPECIAL_CODES.map(([code, name, icon]) => [code, { name, icon }]));
 
-async function loadKeymap() {
-  const L = remapLayer;
+async function loadKeymap(L = remapLayer) {
   if (!layerCache[L]) {
     const rows = [];
     for (let r = 0; r < 6; r++) {
@@ -2059,8 +2075,7 @@ function remapTarget() {
   return selected.size === 1 ? selected.values().next().value : null;
 }
 
-async function refreshKeymap() {
-  const L = remapLayer;
+async function refreshKeymap(L = remapLayer) {
   const rows = [];
   for (let r = 0; r < 6; r++) {
     const row = await getKeyRow(r, L);
@@ -2216,6 +2231,7 @@ const keyUnder = (x, y) => {
   return el && el.closest ? el.closest('#kb .kb-key') : null;
 };
 
+let dragMovePending = false, dragX = 0, dragY = 0;
 addEventListener('pointermove', e => {
   if (!drag) return;
   if (!drag.moved) {
@@ -2228,10 +2244,21 @@ addEventListener('pointermove', e => {
     document.body.appendChild(drag.ghost);
     document.getElementById('kb').classList.add('dropping');
   }
+  // The ghost tracks the cursor on every event (cheap: a style write). elementFromPoint()
+  // forces a synchronous layout, and doing that right after the style write above stalls
+  // the next paint - so it, and the classList scan it feeds, are rAF-gated to run once per
+  // frame instead of once per native pointermove (which can fire 60-120x/s).
   drag.ghost.style.left = e.clientX + 'px';
   drag.ghost.style.top = e.clientY + 'px';
-  const over = keyUnder(e.clientX, e.clientY);
-  for (const el of keyEl.values()) el.classList.toggle('droptarget', el === over);
+  dragX = e.clientX; dragY = e.clientY;
+  if (dragMovePending) return;
+  dragMovePending = true;
+  requestAnimationFrame(() => {
+    dragMovePending = false;
+    if (!drag) return;
+    const over = keyUnder(dragX, dragY);
+    for (const el of keyEl.values()) el.classList.toggle('droptarget', el === over);
+  });
 });
 
 addEventListener('pointerup', e => {
