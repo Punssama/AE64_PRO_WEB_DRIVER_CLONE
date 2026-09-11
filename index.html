@@ -1389,8 +1389,23 @@ function paintKeyFill(rc, raw) {
   el.style.height = Math.max(0, Math.min(100, (raw / full) * 100)) + '%';
 }
 
+// Every other key only gets a down/up bool, not a travel depth - full or empty, not a
+// percentage. Cheaper to paint and, more importantly, doesn't imply a precision the KeyStatus
+// read never had.
+function paintKeyPressed(rc, down) {
+  const el = keyLvlEl.get(rc);
+  if (el) el.style.height = down ? '100%' : '0%';
+}
+
 function paintTravelRow(row, data) {
   for (let col = 0; col < data.length; col++) paintKeyFill(`${row}-${col}`, data[col]);
+}
+
+function paintRowPressed(row, statusData, skipCol) {
+  for (let col = 0; col < statusData.length; col++) {
+    if (col === skipCol) continue;
+    paintKeyPressed(`${row}-${col}`, statusData[col] !== 0);
+  }
 }
 
 // Reading and painting are decoupled on purpose: feedTT() runs on every single sample,
@@ -1399,33 +1414,42 @@ function paintTravelRow(row, data) {
 // live marker, the readout text) doesn't need to happen any faster than the screen can
 // show it - doing it on every sample too was pegging the main thread. rAF-gate the paint,
 // not the read: it applies whatever the latest sample was once per frame.
-let travelPaintPending = false, pendingWatched = null;
+let travelPaintPending = false, pendingWatched = null, pendingOtherStatus = null;
 function scheduleTravelPaint() {
   if (travelPaintPending) return;
   travelPaintPending = true;
   requestAnimationFrame(() => {
     travelPaintPending = false;
-    if (!travelRunning || !pendingWatched) return; // a queued frame must not repaint after clearTravelPaint()
-    const { row, data, rc, route } = pendingWatched;
-    pendingWatched = null;
-    paintTravelRow(row, data);
-    renderTT(route);
-    const live = document.getElementById('liveMark');
-    if (live) {
-      const full = keyTravel.get(rc) || 3390;
-      live.hidden = false;
-      live.style.top = Math.max(0, Math.min(100, (route / full) * 100)) + '%';
-      live.querySelector('span').textContent = 'now ' + MM(route);
+    if (!travelRunning) return; // a queued frame must not repaint after clearTravelPaint()
+    if (pendingWatched) {
+      const { row, col, statusData, rc, route } = pendingWatched;
+      pendingWatched = null;
+      paintKeyFill(rc, route);
+      paintRowPressed(row, statusData, col); // free - same read the watched key's status came from
+      renderTT(route);
+      const live = document.getElementById('liveMark');
+      if (live) {
+        const full = keyTravel.get(rc) || 3390;
+        live.hidden = false;
+        live.style.top = Math.max(0, Math.min(100, (route / full) * 100)) + '%';
+        live.querySelector('span').textContent = 'now ' + MM(route);
+      }
+    }
+    if (pendingOtherStatus) {
+      const { row, statusData } = pendingOtherStatus;
+      pendingOtherStatus = null;
+      paintRowPressed(row, statusData, -1);
     }
   });
 }
 
-// Only the watched row is read/painted while a key is selected - reading the other rows
-// too (to keep their fill "alive") cost an extra HID round trip every 10th pass, and on
-// real hardware that was enough to make those rows visibly lag behind the watched one.
-// Not worth it: the point of this view is one key's precise reading, not a full-board
-// meter. Selecting a key clears the board first so old fill doesn't sit there stale.
-let travelRunning = false;
+// The watched key alone gets a precise travel-depth fill, read and painted every pass with
+// no delay - that sample rate is what pins down the switching point. Every other key only
+// needs to show whether it is currently down, which costs nothing extra for the watched
+// row (its KeyStatus read already covers every column) and, for the rest of the board, one
+// throttled row of KeyStatus every 10th pass - cheap enough that it does not compete with
+// the watched key's sample rate the way polling their travel depth did.
+let travelRunning = false, rrRow = 0;
 async function travelLoop() {
   while (travelRunning) {
     if (device && !writing) {
@@ -1441,8 +1465,13 @@ async function travelLoop() {
         const rt = await getAxisRow(AXIS_MODE.Route, row, 300);
         if (rt && ks) {
           feedTT(rt.data[col], ks.data[col]);
-          pendingWatched = { row, data: rt.data, rc, route: rt.data[col] };
+          pendingWatched = { row, col, statusData: ks.data, rc, route: rt.data[col] };
           scheduleTravelPaint();
+        }
+        const other = KB_ROWS[(rrRow++ / 10 | 0) % KB_ROWS.length];
+        if (rrRow % 10 === 0 && other !== row) {
+          const o = await getAxisRow(AXIS_MODE.KeyStatus, other, 300);
+          if (o) { pendingOtherStatus = { row: other, statusData: o.data }; scheduleTravelPaint(); }
         }
       } else {
         renderTT(0);
