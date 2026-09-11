@@ -65,15 +65,17 @@
   #kcOverlay { position: absolute; inset: 0; z-index: 21; display: flex; align-items: center; justify-content: center; background: rgba(18,53,43,.55); }
   #kcOverlay .panel { background: var(--surface); box-shadow: 6px 6px 0 rgba(18,53,43,.45); display: flex; flex-direction: column; gap: 8px; }
   #kcOverlay .hint { margin: 0; }
-  /* One line, label then value - the same shape as the Key 1/Key 2 readout in SOCD/RS -
-     not a stacked two-line button. A slot button only saves space over that if it stays
-     as compact as the thing it is a picker for. */
-  .kcslot { display: flex; align-items: baseline; gap: 5px; padding: 4px 9px; }
-  .kcslot b { font-size: 17px; }
-  /* DKS/MPT/MT/TGL/END: one key, N output slots plus a handful of numbers - laid out as
-     a wrapping row of slot buttons above a wrapping row of compact number fields, rather
-     than SOCD/RS's fixed two-column layout, since the slot count varies 1-4 by type. */
-  .hkslots { display: flex; gap: 6px; flex-wrap: wrap; }
+  .kcslot { padding: 3px 9px; }
+  .kcslot b { font-weight: normal; }
+  /* DKS/MPT/MT/TGL/END: one key, 1-4 stages. Each stage is its own row - name, the key
+     it sends, and (where the type has one) that stage's own number right beside it - a
+     BIOS-setup-style parameter table, which is both the clearest layout for "which
+     number belongs to which slot" and squarely on-genre for this app's retro look.
+     A handful of numbers that apply to the whole binding rather than one stage (DKS's
+     dead-zones, END's delay) sit below as their own compact row. */
+  .hkslots { display: flex; flex-direction: column; gap: 4px; }
+  .hkstage { display: flex; align-items: center; gap: 8px; }
+  .hkstage input[type=number] { width: 60px; padding: 2px 6px; }
   .hknums { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
   .hknums .numfield { display: flex; align-items: center; gap: 5px; }
   .hknums .numfield label { white-space: nowrap; }
@@ -3238,30 +3240,42 @@ function endPacket(rc, kcs, nums) {
           ...u16le16bit(kcs[0]), ...u16le16bit(kcs[1]), ...u16le16bit(nums[0])];
 }
 
-// ponytail: DKS's 4 "%" fields and END's "Delay" are read from the wire exactly as the
-// vendor sends them, but neither field's real-world unit is independently confirmed -
-// treat both as a well-evidenced guess, not a verified fact, until tested on hardware:
+// ponytail: a few fields below are read from the wire exactly as the vendor sends them,
+// but their real-world unit/meaning is not fully nailed down - cross-checked against the
+// vendor's own official SDK docs (sparklinkplayjoy.github.io/keyboard-docs, a sibling
+// product line's public API reference) as well as outside sources, not just guessed:
 // - DKS trps are raw UNSCALED BYTES (0-255), not the LE16 x1000 mm every other depth
-//   field on this device uses. Public guides for DKS on OTHER Hall-effect keyboards
-//   (e.g. glacierpcgaming.com) describe it as absolute mm (0.1-4.0mm) - but a single
-//   raw byte cannot hold this board's own 3.39mm max travel at that resolution (x100
-//   would need up to ~340), so THIS firmware's encoding cannot be that scheme. A
-//   percentage of travel fits a byte cleanly, works for any board regardless of its
-//   own max travel, and matches the vendor's own "10%-90% rebound travel" copy for
-//   the sibling END feature - the best-supported guess, not a confirmed one.
-// - END's own vendor UI copy describes the feature as an adjustable "trigger point"
-//   (10%-90% rebound travel), but the vendor's OWN source code names this exact wire
-//   field `delay` - which of "position" or "time" it actually is is unresolved even
-//   after checking (no public source on END/"End Trigger" under any name was found).
+//   field on this device uses. A percentage of travel fits a byte cleanly and matches
+//   END's own "10%-90% rebound travel" copy - the best-supported guess. Telling: even
+//   the vendor's OWN SDK docs call this out as unclear ("trps values represent trigger
+//   point travel parameters, e.g. 63 needs converting to binary") without explaining
+//   what that conversion is, so this is not just a gap in what I could find.
+// - END: the official docs settle the "position vs time" question the vendor's own
+//   source-code name (`delay`) left open - getEND()/setEND() both document it in plain
+//   ms. What's still a guess is the user's own read of the FEATURE (confirmed nowhere
+//   in writing, but consistent with everything found): one trigger point, crossed going
+//   down fires the Press key, crossed going up (rebounding) fires the Release key, and
+//   Delay is a timing gap around that crossing rather than the point's position.
+// - MT's "Hold threshold": the official docs attach a "value is in 10ms units" note to
+//   a function they call getMtorTgl/setMT - but TGL's own getTGL()/setTGL() are
+//   separately documented in plain ms, and MT/TGL are unambiguously two different wire
+//   types on this device's own firmware (different byte layout, both verified live) -
+//   so it's unclear the 10ms-unit note even applies to THIS type=3, and the wire
+//   encoding itself (a plain LE16, round-tripped exactly on hardware) doesn't disambiguate
+//   "300" meaning 300ms from meaning 3000ms. Left as plain ms pending a hardware test.
 const HK_SINGLE_SPECS = {
   dks: {
     type: HK_TYPE.DKS, field: 'dks', label: 'DKS',
-    slots: ['Press', 'Bottom', 'Release', 'Lift'],
-    nums: [
-      { label: 'Press %', min: 0, max: 100, step: 1 },
-      { label: 'Bottom %', min: 0, max: 100, step: 1 },
-      { label: 'Release %', min: 0, max: 100, step: 1 },
-      { label: 'Lift %', min: 0, max: 100, step: 1 },
+    // Each stage is its own row: which key it sends, and (DKS's own number) how far
+    // through the press it fires. The 2 dead-zones apply to the whole binding, not one
+    // stage, so they sit separately in `extra` rather than getting a 5th/6th "stage".
+    rows: [
+      { slot: 'Press', num: { label: '%', min: 0, max: 100, step: 1 } },
+      { slot: 'Bottom', num: { label: '%', min: 0, max: 100, step: 1 } },
+      { slot: 'Release', num: { label: '%', min: 0, max: 100, step: 1 } },
+      { slot: 'Lift', num: { label: '%', min: 0, max: 100, step: 1 } },
+    ],
+    extra: [
       { label: 'Press dead-zone (mm)', min: 0, max: 4, step: 0.05 },
       { label: 'Release dead-zone (mm)', min: 0, max: 4, step: 0.05 },
     ],
@@ -3271,36 +3285,44 @@ const HK_SINGLE_SPECS = {
   },
   mpt: {
     type: HK_TYPE.MPT, field: 'mpt', label: 'MPT',
-    slots: ['Light', 'Medium', 'Heavy'],
-    nums: [
-      { label: 'Light depth (mm)', min: 0, max: 4, step: 0.05 },
-      { label: 'Medium depth (mm)', min: 0, max: 4, step: 0.05 },
-      { label: 'Heavy depth (mm)', min: 0, max: 4, step: 0.05 },
+    rows: [
+      { slot: 'Light', num: { label: 'mm', min: 0, max: 4, step: 0.05 } },
+      { slot: 'Medium', num: { label: 'mm', min: 0, max: 4, step: 0.05 } },
+      { slot: 'Heavy', num: { label: 'mm', min: 0, max: 4, step: 0.05 } },
     ],
+    extra: [],
     defaultNums: [0.5, 1.5, 2.5],
     getCurrent: hk => ({ kcs: hk.mpt.kcs, nums: hk.mpt.dbs }),
     packet: mptPacket,
   },
   mt: {
     type: HK_TYPE.MT, field: 'mt', label: 'MT',
-    slots: ['Tap', 'Hold'],
-    nums: [{ label: 'Hold threshold (ms)', min: 0, max: 1000, step: 10 }],
+    // Tap has no number of its own - only Hold's threshold is configurable.
+    rows: [
+      { slot: 'Tap', num: null },
+      { slot: 'Hold', num: { label: 'ms', min: 0, max: 1000, step: 10 } },
+    ],
+    extra: [],
     defaultNums: [200],
     getCurrent: hk => ({ kcs: hk.mt.kcs, nums: [hk.mt.time] }),
     packet: mtPacket,
   },
   tgl: {
     type: HK_TYPE.TGL, field: 'tgl', label: 'TGL',
-    slots: ['Toggles'],
-    nums: [{ label: 'Repeat (ms)', min: 0, max: 1000, step: 10 }],
+    rows: [{ slot: 'Toggles', num: { label: 'repeat ms', min: 0, max: 1000, step: 10 } }],
+    extra: [],
     defaultNums: [0],
     getCurrent: hk => ({ kcs: [hk.tgl.kc], nums: [hk.tgl.time] }),
     packet: tglPacket,
   },
   end: {
     type: HK_TYPE.END, field: 'end', label: 'END',
-    slots: ['Press', 'Release'],
-    nums: [{ label: 'Delay', min: 0, max: 100, step: 1 }],
+    // Neither slot has its own number - Delay is one value for the whole binding.
+    rows: [
+      { slot: 'Press', num: null },
+      { slot: 'Release', num: null },
+    ],
+    extra: [{ label: 'Delay (ms)', min: 0, max: 1000, step: 10 }],
     defaultNums: [0],
     getCurrent: hk => ({ kcs: hk.end.kcs, nums: [hk.end.delay] }),
     packet: endPacket,
@@ -3324,36 +3346,62 @@ function hkSingleConflict(rc, spec) {
   return `${keyLabelOf(rc)} already has a ${HK_NAMES[hk.type] || 'type ' + hk.type} binding - delete it first.`;
 }
 
-// One button per output slot, showing the key it currently sends; click opens the
-// compact overlay picker. Mutates kcs in place and repaints just its own label, since
-// nothing else on screen depends on which key a slot holds.
-function renderHkSlots(el, spec, kcs, disabled) {
+// One row per stage: its name, the key it currently sends (click opens the compact
+// overlay picker), and - where this type gives the stage its own number - that number
+// right beside it. Mutates kcs/nums in place and repaints just the one row/field that
+// changed, since nothing else on screen depends on which key or number a stage holds.
+function renderHkStages(el, spec, kcs, nums, disabled) {
   el.innerHTML = '';
-  spec.slots.forEach((label, i) => {
-    const b = document.createElement('button');
-    b.className = 'kcslot';
-    b.innerHTML = `<span class="muted">${label}</span><b></b>`;
-    const out = b.querySelector('b');
+  let ni = 0;
+  spec.rows.forEach((row, i) => {
+    const line = document.createElement('div');
+    line.className = 'hkstage';
+    const label = document.createElement('span');
+    label.className = 'muted';
+    label.textContent = row.slot;
+    const btn = document.createElement('button');
+    btn.className = 'kcslot';
+    const out = document.createElement('b');
     out.textContent = kcs[i] ? keyName(kcs[i]) : '--';
-    b.disabled = disabled;
-    b.onclick = () => openKcPicker(kcs[i], `${spec.label} - ${label}`, code => { kcs[i] = code; out.textContent = keyName(code); });
-    el.appendChild(b);
+    btn.appendChild(out);
+    btn.disabled = disabled;
+    btn.onclick = () => openKcPicker(kcs[i], `${spec.label} - ${row.slot}`, code => { kcs[i] = code; out.textContent = keyName(code); });
+    line.append(label, btn);
+    if (row.num) {
+      const n = ni++;
+      const unit = document.createElement('span');
+      unit.className = 'muted';
+      unit.textContent = row.num.label;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = row.num.min; input.max = row.num.max; input.step = row.num.step;
+      input.value = nums[n];
+      input.disabled = disabled;
+      input.onchange = () => { nums[n] = Math.max(row.num.min, Math.min(row.num.max, Number(input.value) || 0)); input.value = nums[n]; };
+      line.append(unit, input);
+    }
+    el.appendChild(line);
   });
 }
 
-function renderHkNums(el, spec, nums, disabled) {
+// The numbers that apply to the whole binding rather than one stage - DKS's two
+// dead-zones, END's delay. Indices continue where the per-stage numbers left off, so
+// bindHkSingle() can send kcs/nums straight through without knowing this split exists.
+function renderHkExtra(el, spec, nums, disabled) {
   el.innerHTML = '';
-  spec.nums.forEach((f, i) => {
+  const base = spec.rows.filter(r => r.num).length;
+  spec.extra.forEach((f, i) => {
+    const n = base + i;
     const wrap = document.createElement('span');
     wrap.className = 'numfield';
-    const id = `hknum_${spec.field}_${i}`;
+    const id = `hkextra_${spec.field}_${i}`;
     wrap.innerHTML = `<label class="muted" for="${id}">${f.label}</label>`;
     const input = document.createElement('input');
     input.type = 'number'; input.id = id;
     input.min = f.min; input.max = f.max; input.step = f.step;
-    input.value = nums[i];
+    input.value = nums[n];
     input.disabled = disabled;
-    input.onchange = () => { nums[i] = Math.max(f.min, Math.min(f.max, Number(input.value) || 0)); input.value = nums[i]; };
+    input.onchange = () => { nums[n] = Math.max(f.min, Math.min(f.max, Number(input.value) || 0)); input.value = nums[n]; };
     wrap.appendChild(input);
     el.appendChild(wrap);
   });
@@ -3372,7 +3420,7 @@ function renderHkSingle(prefix, spec) {
   const bound = !!(hk && hk.type === spec.type);
 
   if (!rc || !hkEdit || hkEdit.prefix !== prefix || hkEdit.rc !== rc) {
-    const seed = bound ? spec.getCurrent(hk) : { kcs: spec.slots.map(() => 0), nums: spec.defaultNums.slice() };
+    const seed = bound ? spec.getCurrent(hk) : { kcs: spec.rows.map(() => 0), nums: spec.defaultNums.slice() };
     hkEdit = rc ? { prefix, rc, kcs: seed.kcs.slice(), nums: seed.nums.slice() } : null;
   }
 
@@ -3387,8 +3435,8 @@ function renderHkSingle(prefix, spec) {
   const canEdit = !!(ready && rc && !conflict);
   const slotsEl = document.getElementById(`${prefix}Slots`), numsEl = document.getElementById(`${prefix}Nums`);
   if (hkEdit) {
-    renderHkSlots(slotsEl, spec, hkEdit.kcs, !canEdit);
-    renderHkNums(numsEl, spec, hkEdit.nums, !canEdit);
+    renderHkStages(slotsEl, spec, hkEdit.kcs, hkEdit.nums, !canEdit);
+    renderHkExtra(numsEl, spec, hkEdit.nums, !canEdit);
   } else {
     slotsEl.innerHTML = ''; numsEl.innerHTML = '';
   }
