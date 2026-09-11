@@ -940,7 +940,6 @@ async function useDevice(d) {
   // (visibly seconds) even though the read itself was correct once it finally ran.
   await readRate();
   await fillFormFrom(selected.values().next().value);
-  await loadAllModes();
   await loadLighting();
   // Layer 0 explicitly, not whatever `remapLayer` happens to be left over from a prior
   // session (e.g. the Functions tab was open when the keyboard disconnected) - the board
@@ -948,6 +947,14 @@ async function useDevice(d) {
   // setRemapLayer() the first time the Functions tab opens.
   if (await loadKeymap(0)) await refreshKeymap(0);
   paintCaps();
+  // Last, not third: everything above answers in one exchange or a handful, but this walks
+  // all 64 keys - by far the biggest thing on this list. It shares the same ioChain with
+  // Travel test's own polling loop, which starts above (setTravelTest(true)) the moment
+  // this connect is for a page already sitting on that view - putting the 64-key scan
+  // first meant a key picked and pressed right after connect sat behind a queue of ~64
+  // unrelated reads before its own first sample (or the right keyTravel scale for it,
+  // which this scan is also what supplies) came back at all.
+  await loadAllModes();
   return true;
 }
 
@@ -1450,7 +1457,18 @@ async function travelLoop() {
       if (rc !== tt.rc) {
         resetTT(rc);
         pendingWatched = null; // drop any not-yet-painted sample from whatever key this replaces
-        if (rc) clearTravelPaint();
+        if (rc) {
+          clearTravelPaint();
+          // loadAllModes() is what normally fills this in, but it walks all 64 keys on its
+          // own schedule and may not have reached this one yet - without its own scale, the
+          // fill falls back to a guessed constant and shows the wrong depth. One read fixes
+          // it for this key specifically instead of waiting on the other 63.
+          if (!keyTravel.has(rc)) {
+            const [r, c] = rc.split('-').map(Number);
+            const cal = await getPerformanceRaw(r, c, 300);
+            if (cal && cal.axisRangeMax > 0) keyTravel.set(rc, cal.axisRangeMax);
+          }
+        }
       }
       if (rc) {
         const [row, col] = rc.split('-').map(Number);
