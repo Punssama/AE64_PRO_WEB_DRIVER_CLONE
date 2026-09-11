@@ -584,9 +584,11 @@ async function toggleKey(row, col) {
   const rc = `${row}-${col}`;
   if (selected.has(rc)) { selected.delete(rc); updateSelectionUI(); return; }
   // Remapping is one key at a time, so picking a second one there replaces the first
-  // rather than building a selection that can only produce "pick exactly one".
+  // rather than building a selection that can only produce "pick exactly one". Travel
+  // test is the same: its stats (tt) track a single watched key, so a second pick swaps
+  // the watch instead of silently being ignored while the UI implies both are tracked.
   // Trigger settings are the opposite: they are meant to be written to a whole handful.
-  if (!document.getElementById('view-remap').hidden) selected.clear();
+  if (!document.getElementById('view-remap').hidden || !document.getElementById('view-traveltest').hidden) selected.clear();
   selected.add(rc);
   updateSelectionUI();
   await fillFormFrom(rc);
