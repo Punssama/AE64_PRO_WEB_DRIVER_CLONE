@@ -344,6 +344,15 @@
   .pick { display: flex; gap: 4px; flex-wrap: wrap; }
   .pick button { padding: 3px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); min-width: 34px; }
   .pick button.on, .pick button.on:hover { background: var(--ink); color: var(--accent); }
+  /* Lighting had every control (area, 20-effect picker, five parameter fields, custom
+     paint) packed edge to edge with no grouping - same small-caps label already used for
+     the sidebar's own TRIGGER/KEYS/DEVICE groups, plus real spacing between groups, so
+     it reads as sections instead of one dense block. */
+  .light-label { display: block; font-size: 15px; color: var(--ink); opacity: .75; letter-spacing: .09em; margin-bottom: 6px; }
+  .light-section { margin-bottom: 20px; }
+  .light-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 32px; margin-bottom: 22px; align-items: end; }
+  .light-fields .light-full { grid-column: 1 / -1; }
+  .light-custom { padding-top: 16px; border-top: 2px solid var(--ink); margin-bottom: 0; }
   #socdMode button { padding: 2px 7px; }
   .swatch { width: 26px; height: 26px; min-width: 0; padding: 0; box-shadow: none; }
   .swatch.on { outline: 3px solid var(--accent); outline-offset: -6px; }
@@ -724,23 +733,32 @@
         <div class="pick" id="lightAreas"></div>
         <span class="hint" id="lightNote">Each area has its own effect and switch.</span>
       </div>
-      <div class="pick" id="lightModes"></div>
-      <div class="fields">
+
+      <div class="light-section">
+        <span class="light-label">Effect</span>
+        <div class="pick" id="lightModes"></div>
+      </div>
+
+      <div class="light-fields">
         <div class="field"><label for="lightLum">Brightness %</label>
           <div class="ctl"><input type="range" id="lightLum_r" min="0" max="100" step="1"><input id="lightLum" type="number" min="0" max="100" step="1"></div></div>
         <div class="field"><label for="lightSpeed">Speed %</label>
           <div class="ctl"><input type="range" id="lightSpeed_r" min="0" max="100" step="1"><input id="lightSpeed" type="number" min="0" max="100" step="1"></div></div>
         <div class="field"><label>Direction</label><div class="pick" id="lightDir"></div></div>
         <div class="field" id="lightLedLayerField" hidden><label>LED layer</label><div class="pick" id="lightLedLayer"></div></div>
-        <div class="field"><label>Colour</label><div class="pick" id="lightPalette"></div></div>
+        <div class="field light-full"><label>Colour</label><div class="pick" id="lightPalette"></div></div>
       </div>
-      <div class="lightrow">
-        <button id="customPaintToggle" class="toggle" aria-pressed="false">
-          <span>Paint custom colours</span><span class="tog">OFF</span>
-        </button>
-        <input type="color" id="customBrush" value="#ff2d55">
-        <button id="customClear">Clear all custom</button>
-        <span class="hint">Click a key above to paint it - saved on the keyboard, no separate save needed.</span>
+
+      <div class="light-section light-custom">
+        <span class="light-label">Custom per-key colour</span>
+        <div class="lightrow">
+          <button id="customPaintToggle" class="toggle" aria-pressed="false">
+            <span>Paint custom colours</span><span class="tog">OFF</span>
+          </button>
+          <input type="color" id="customBrush" value="#ff2d55">
+          <button id="customClear">Clear all custom</button>
+          <span class="hint">Click a key above to paint it - saved on the keyboard, no separate save needed.</span>
+        </div>
       </div>
     </div>
 
