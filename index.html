@@ -29,7 +29,7 @@
   html, body { height: 100%; }
   body {
     margin: 0; padding: 10px; color: var(--ink); overflow: hidden;
-    font-family: var(--term); font-size: 18px; line-height: 1.35;
+    font-family: var(--term); font-size: 19px; line-height: 1.35;
     background-color: var(--desk);
     background-image: repeating-linear-gradient(45deg, rgba(18,53,43,.07) 0 2px, transparent 2px 4px);
   }
@@ -97,9 +97,9 @@
      widest scope on screen: every view below it edits whichever config is picked here. */
   #configPicker { display: flex; flex-direction: column; gap: 3px; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 2px solid var(--ink); }
   #configPicker label { font-size: 15px; color: var(--ink); opacity: .75; letter-spacing: .09em; }
-  #configSelect { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--accent); color: var(--ink); font-family: var(--term); font-size: 17px; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
+  #configSelect { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--accent); color: var(--ink); font-family: var(--term); font-size: 19px; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
   #configSelect:disabled { background: var(--surface); cursor: not-allowed; }
-  #configNameInput { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 17px; }
+  #configNameInput { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 19px; }
   .navbtn { width: 100%; text-align: left; }
   /* Every entry sits under a heading naming what it is about, so the list can grow a view
      without turning into one long column to scan top to bottom. */
@@ -125,7 +125,7 @@
   /* Panel titles are inverse-video strips flush in the frame, like a TUI group box. */
   h2 { flex: none; margin: -10px -10px 8px; padding: 1px 10px; font-size: 17px; font-weight: normal; background: var(--ink); color: var(--surface); letter-spacing: .05em; }
 
-  button { font-family: var(--term); font-size: 17px; line-height: 1; padding: 7px 13px; background: var(--surface); color: var(--ink); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
+  button { font-family: var(--term); font-size: 18px; line-height: 1; padding: 7px 13px; background: var(--surface); color: var(--ink); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
   button:hover { background: var(--accent); }
   button:active { transform: translate(3px, 3px); box-shadow: none; }
   button.primary { background: var(--accent); width: 100%; padding: 11px; }
@@ -157,7 +157,7 @@
      melted into the background. Caps are now lighter than the panel and the bezel is
      lifted off it with a hard shadow, which makes it read as a device sitting there. */
   #kb { position: relative; margin: 0 auto; max-width: 100%; background: var(--ink); border: 3px solid var(--ink); padding: 9px; overflow-x: auto; box-shadow: 5px 5px 0 rgba(18,53,43,.45); }
-  #kb .kb-key { position: absolute; background: #FFF8EC; color: var(--ink); border: 1px solid var(--ink); box-shadow: 0 2px 0 rgba(18,53,43,.55); border-radius: 0; font-family: var(--term); font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 0; overflow: hidden; }
+  #kb .kb-key { position: absolute; background: #FFF8EC; color: var(--ink); border: 1px solid var(--ink); box-shadow: 0 2px 0 rgba(18,53,43,.55); border-radius: 0; font-family: var(--term); font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 0; overflow: hidden; }
   /* The LED layer sits under .cap for the same reason .lvl does - it is added first and
      absolutely positioned, so the legend and the RT tag stay readable on top of it. */
   #kb .kb-key .led { position: absolute; inset: 0; pointer-events: none; }
@@ -171,7 +171,7 @@
   #kb .kb-key:hover { background: var(--accent); }
   #kb .kb-key.selected, #kb .kb-key.ktdown { background: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
-  #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 12px; line-height: 1.15; background: var(--ink); color: var(--accent); }
+  #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 13px; line-height: 1.15; background: var(--ink); color: var(--accent); }
   #kb .kb-key.rt .tag { display: block; }
   /* Advanced keys: the chip names the binding (S1, S2... for SOCD pairs) instead, so the
      RT chip steps aside there rather than two meanings sharing one corner. */
@@ -246,13 +246,13 @@
   .dks-tick { position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%); width: 7px; height: 7px; background: var(--surface); border: 2px solid var(--muted); pointer-events: none; }
 
   .field { margin-bottom: 11px; }
-  .field label { display: block; font-size: 17px; color: var(--muted); margin-bottom: 3px; }
-  .field input, .field select { width: 100%; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
+  .field label { display: block; font-size: 18px; color: var(--muted); margin-bottom: 3px; }
+  .field input, .field select { width: 100%; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 20px; }
 
   /* Slider plus typed value. The spinner arrows are removed - the slider is the
      coarse control, the box is for exact entry. */
   .ctl { display: flex; align-items: center; gap: 9px; }
-  .ctl input[type=number] { width: 76px; flex: none; text-align: right; box-sizing: border-box; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
+  .ctl input[type=number] { width: 76px; flex: none; text-align: right; box-sizing: border-box; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 20px; }
   input[type=number]::-webkit-inner-spin-button,
   input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; appearance: textfield; }
@@ -308,13 +308,13 @@
   .socd-edit { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; line-height: 1.2; }
   .socd-edit .hint { margin: 0; }
   .socd-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .socd-row input[type=number] { width: 64px; padding: 2px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; text-align: right; }
+  .socd-row input[type=number] { width: 64px; padding: 2px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 20px; text-align: right; }
   /* Bind/Delete are secondary actions on an already-tight view, not the app's main call
      to action, so they don't need the full button size everything else gets. */
   .socd-edit .socd-row button { padding: 3px 11px; }
   .socd-list { flex: 0 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   #socdList { display: flex; flex-direction: column; gap: 4px; }
-  #socdList button { text-align: left; padding: 4px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); }
+  #socdList button { text-align: left; padding: 4px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--ink); }
   #socdList button.on, #socdList button.on:hover { background: var(--ink); color: var(--accent); }
   .socd-list .hint, .socd-list .muted { margin: 0; }
   .kp-block { display: flex; flex-direction: column; gap: 2px; }
@@ -323,7 +323,7 @@
                    font-size: calc(var(--kph, 17px) * 0.6);
                    box-shadow: 1px 1px 0 var(--ink); overflow: hidden; }
   .kp-row button.on, .kp-row button.on:hover { background: var(--ink); color: var(--accent); }
-  .tab { min-width: 150px; padding: 5px 12px; font-size: 17px; text-align: center; box-shadow: none; }
+  .tab { min-width: 150px; padding: 5px 12px; font-size: 18px; text-align: center; box-shadow: none; }
   .tab.active, .tab.active:hover { background: var(--ink); color: var(--accent); }
 
   /* The mode is one switch, not a list of two - a toggle says so at a glance. */
@@ -356,12 +356,12 @@
   .lightrow { display: flex; align-items: center; gap: 14px; margin-bottom: 5px; }
   .lightrow .toggle { margin-bottom: 0; width: 200px; flex: none; }
   .lightrow .hint { margin: 0; }
-  .lightrow select { padding: 4px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
+  .lightrow select { padding: 4px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 20px; }
   /* Longer label than the other toggle on this row (Lighting) needs more than its 200px. */
   #customPaintToggle { width: 250px; }
   #customBrush { width: 42px; height: 32px; padding: 2px; border: 2px solid var(--ink); background: var(--surface); cursor: pointer; flex: none; }
   .pick { display: flex; gap: 4px; flex-wrap: wrap; }
-  .pick button { padding: 3px 9px; font-size: 16px; box-shadow: 2px 2px 0 var(--ink); min-width: 34px; }
+  .pick button { padding: 3px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--ink); min-width: 34px; }
   .pick button.on, .pick button.on:hover { background: var(--ink); color: var(--accent); }
   /* Lighting had every control (area, 20-effect picker, five parameter fields, custom
      paint) packed edge to edge with no grouping - same small-caps label already used for
@@ -900,7 +900,7 @@ const KEY_LAYOUT = [
   ['5-6','Space',345,119,136,22],['5-9','R-Alt',484,119,22,22],['5-10','Fn1',507,119,22,22],
   ['5-12','←',531,119,22,22],['5-13','↓',554,119,22,22],['5-14','→',577,119,22,22],
 ];
-const KB_MINX = 257, KB_MINY = 28, KB_SCALE = 1.6;
+const KB_MINX = 257, KB_MINY = 28, KB_SCALE = 1.85;
 const KEY_LABEL = new Map(KEY_LAYOUT.map(([rc, label]) => [rc, label]));
 // Starts empty on purpose: Set refuses to write with nothing selected, so no key
 // can be touched before one is deliberately picked.
