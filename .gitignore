@@ -8,3 +8,6 @@ server.log
 # Same for the v2 app's chunks, pulled from https://www.xsyd.top/v2-app/ to check
 # whether the vendor implements calibration / travel test (it does not).
 v2-*.js
+
+# Scratch Playwright QA pass (screenshots + a local playwright install) - not app content.
+.qa-scratch/
