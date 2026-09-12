@@ -12,11 +12,25 @@
      had to do it. Ink is the supplied green pushed dark so text stays readable. */
   :root {
     --desk: #59B292;
+    --hatch: rgba(18,53,43,.07);
     --surface: #FAE7CB;
+    --field: #FFF6E6;
+    --key: #FFF8EC;
+    --board: #12352B;
     --accent: #FFC94D;
+    --on-accent: #12352B;
     --ink: #12352B;
     --muted: #4A6B5C;
+    --shadow: #12352B;
+    --sel-bg: #12352B;
+    --sel-fg: #FFC94D;
+    --title-bg: #12352B;
+    --title-fg: #FAE7CB;
+    --green: #59B292;
+    --seg: #234A3E;
+    --live: #FAE7CB;
     --danger: #B33A3A;
+    --on-danger: #FAE7CB;
     --term: 'VT323', 'Courier New', monospace;
   }
   * { box-sizing: border-box; }
@@ -31,14 +45,14 @@
     margin: 0; padding: 10px; color: var(--ink); overflow: hidden;
     font-family: var(--term); font-size: 19px; line-height: 1.35;
     background-color: var(--desk);
-    background-image: repeating-linear-gradient(45deg, rgba(18,53,43,.07) 0 2px, transparent 2px 4px);
+    background-image: repeating-linear-gradient(45deg, var(--hatch) 0 2px, transparent 2px 4px);
   }
   .wrap { height: 100%; display: flex; }
 
   /* Title bar and status bar frame the screen; the desktop shows through between them,
      so each panel reads as its own window instead of one tall shared surface. */
-  .app { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 2px solid var(--ink); box-shadow: 6px 6px 0 rgba(18,53,43,.45); background: transparent; }
-  .titlebar { flex: none; display: flex; align-items: center; gap: 14px; background: var(--accent); border-bottom: 2px solid var(--ink); padding: 4px 12px; }
+  .app { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 2px solid var(--ink); box-shadow: 6px 6px 0 color-mix(in srgb, var(--shadow) 45%, transparent); background: transparent; }
+  .titlebar { flex: none; display: flex; align-items: center; gap: 14px; background: var(--accent); color: var(--on-accent); border-bottom: 2px solid var(--ink); padding: 4px 12px; }
   .titlebar h1 { margin: 0; font-size: 20px; font-weight: normal; letter-spacing: .06em; }
   .titlebar .spacer { flex: 1; }
   /* Which build someone is on, so "press Ctrl+F5" can be checked rather than guessed. */
@@ -53,8 +67,8 @@
      Travel test, not just something that looked slow. `inert` blocks focus and clicks on
      everything under it (Chrome-only, same as WebHID itself, so no fallback needed); the
      overlay on top of that is just what a person sees while it is up. */
-  #connectOverlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(18,53,43,.55); }
-  #connectOverlay p { margin: 0; background: var(--surface); border: 2px solid var(--ink); padding: 14px 22px; box-shadow: 5px 5px 0 rgba(18,53,43,.45); font-size: 18px; }
+  #connectOverlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--shadow) 55%, transparent); }
+  #connectOverlay p { margin: 0; background: var(--surface); border: 2px solid var(--ink); padding: 14px 22px; box-shadow: 5px 5px 0 color-mix(in srgb, var(--shadow) 45%, transparent); font-size: 18px; }
   #connectOverlay p::after { content: '_'; animation: connectBlink 1s step-end infinite; }
   @keyframes connectBlink { 50% { opacity: 0; } }
   /* DKS/MPT/MT/TGL/END each need 1-4 keycode slots, and there is nowhere near enough
@@ -63,8 +77,8 @@
      panel over the whole app, shown only while a slot is actively being picked, built
      from the same kpRows()/PICKER_MAIN/PICKER_NAV the Remap view already uses, just at
      a fixed compact size instead of one measured against a view's free space. */
-  #kcOverlay { position: absolute; inset: 0; z-index: 21; display: flex; align-items: center; justify-content: center; background: rgba(18,53,43,.55); }
-  #kcOverlay .panel { background: var(--surface); box-shadow: 6px 6px 0 rgba(18,53,43,.45); display: flex; flex-direction: column; gap: 8px; }
+  #kcOverlay { position: absolute; inset: 0; z-index: 21; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--shadow) 55%, transparent); }
+  #kcOverlay .panel { background: var(--surface); box-shadow: 6px 6px 0 color-mix(in srgb, var(--shadow) 45%, transparent); display: flex; flex-direction: column; gap: 8px; }
   #kcOverlay .hint { margin: 0; }
   .kcslot { padding: 3px 9px; }
   .kcslot b { font-weight: normal; }
@@ -85,7 +99,7 @@
   .hknums { display: flex; flex-direction: column; gap: 4px; }
   .hknums .numfield { display: flex; align-items: center; gap: 5px; }
   .hknums .numfield label { white-space: nowrap; }
-  .statusbar { flex: none; display: flex; align-items: center; gap: 12px; border-top: 2px solid var(--ink); background: var(--accent); padding: 3px 12px; }
+  .statusbar { flex: none; display: flex; align-items: center; gap: 12px; border-top: 2px solid var(--ink); background: var(--accent); color: var(--on-accent); padding: 3px 12px; }
   .statusbar p { margin: 0; }
   .statusbar .spacer { flex: 1; }
   /* Nothing is ever "unsaved" now, so this is a receipt, not a prompt. */
@@ -97,19 +111,19 @@
      widest scope on screen: every view below it edits whichever config is picked here. */
   #configPicker { display: flex; flex-direction: column; gap: 3px; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 2px solid var(--ink); }
   #configPicker label { font-size: 15px; color: var(--ink); opacity: .75; letter-spacing: .09em; }
-  #configSelect { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--accent); color: var(--ink); font-family: var(--term); font-size: 19px; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
-  #configSelect:disabled { background: var(--surface); cursor: not-allowed; }
-  #configNameInput { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 19px; }
+  #configSelect { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--accent); color: var(--on-accent); font-family: var(--term); font-size: 19px; box-shadow: 3px 3px 0 var(--shadow); cursor: pointer; }
+  #configSelect:disabled { background: var(--surface); color: var(--ink); cursor: not-allowed; }
+  #configNameInput { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--field); color: var(--ink); font-family: var(--term); font-size: 19px; }
   .navbtn { width: 100%; text-align: left; }
   /* Every entry sits under a heading naming what it is about, so the list can grow a view
      without turning into one long column to scan top to bottom. */
   .navgroup { font-size: 15px; color: var(--ink); opacity: .75; letter-spacing: .09em; }
   .navgroup:not(:first-of-type) { margin-top: 6px; }
-  .navbtn.active { background: var(--ink); color: var(--accent); }
-  .navbtn.active:hover { background: var(--ink); }
+  .navbtn.active { background: var(--sel-bg); color: var(--sel-fg); }
+  .navbtn.active:hover { background: var(--sel-bg); }
 
   .center { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; min-height: 0; }
-  .panel { border: 2px solid var(--ink); padding: 10px; background: var(--surface); box-shadow: 4px 4px 0 rgba(18,53,43,.35); }
+  .panel { border: 2px solid var(--ink); padding: 10px; background: var(--surface); box-shadow: 4px 4px 0 color-mix(in srgb, var(--shadow) 35%, transparent); }
   /* The strip carries its own dark bezel, so the panel does not need a full pad under
      it - and in a viewport-locked column those pixels belong to the settings view. */
   .kbpanel { min-width: 0; overflow-x: auto; padding-bottom: 3px; }
@@ -123,13 +137,13 @@
   :disabled, .view [disabled] { opacity: .38; cursor: not-allowed; }
   .gauge.off { opacity: .3; }
   /* Panel titles are inverse-video strips flush in the frame, like a TUI group box. */
-  h2 { flex: none; margin: -10px -10px 8px; padding: 1px 10px; font-size: 17px; font-weight: normal; background: var(--ink); color: var(--surface); letter-spacing: .05em; }
+  h2 { flex: none; margin: -10px -10px 8px; padding: 1px 10px; font-size: 17px; font-weight: normal; background: var(--title-bg); color: var(--title-fg); letter-spacing: .05em; }
 
-  button { font-family: var(--term); font-size: 18px; line-height: 1; padding: 7px 13px; background: var(--surface); color: var(--ink); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
-  button:hover { background: var(--accent); }
+  button { font-family: var(--term); font-size: 18px; line-height: 1; padding: 7px 13px; background: var(--surface); color: var(--ink); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--shadow); cursor: pointer; }
+  button:hover { background: var(--accent); color: var(--on-accent); }
   button:active { transform: translate(3px, 3px); box-shadow: none; }
-  button.primary { background: var(--accent); width: 100%; padding: 11px; }
-  button.primary:hover { background: var(--ink); color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--on-accent); width: 100%; padding: 11px; }
+  button.primary:hover { background: var(--sel-bg); color: var(--sel-fg); }
   :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 
   /* Same height as the keyboard block it replaces, so connecting does not shove the
@@ -139,8 +153,8 @@
   /* The centre column is viewport-locked, so every pixel here comes straight out of the
      settings panel below. Hence one compact row with the caption inline rather than a
      labelled block - a separate label line cost 24px the settings view could not spare. */
-  #ledStrip { margin: 3px auto 0; padding: 3px 5px; background: var(--ink); border: 2px solid var(--ink);
-              box-shadow: 4px 4px 0 rgba(18,53,43,.45); display: flex; align-items: center; gap: 2px; }
+  #ledStrip { margin: 3px auto 0; padding: 3px 5px; background: var(--board); border: 2px solid var(--board);
+              box-shadow: 4px 4px 0 color-mix(in srgb, var(--shadow) 45%, transparent); display: flex; align-items: center; gap: 2px; }
   #ledStrip::before { content: 'UNDERGLOW'; flex: none; font-size: 12px; color: var(--muted); margin-right: 7px; letter-spacing: .5px; }
   #ledStrip i { flex: 1; height: 8px; background: #0C1F19; }
   #kbEmpty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 256px; color: var(--muted); }
@@ -156,8 +170,8 @@
   /* The keycaps used to be the same cream as the panel behind them, so the whole board
      melted into the background. Caps are now lighter than the panel and the bezel is
      lifted off it with a hard shadow, which makes it read as a device sitting there. */
-  #kb { position: relative; margin: 0 auto; max-width: 100%; background: var(--ink); border: 3px solid var(--ink); padding: 9px; overflow-x: auto; box-shadow: 5px 5px 0 rgba(18,53,43,.45); }
-  #kb .kb-key { position: absolute; background: #FFF8EC; color: var(--ink); border: 1px solid var(--ink); box-shadow: 0 2px 0 rgba(18,53,43,.55); border-radius: 0; font-family: var(--term); font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 0; overflow: hidden; }
+  #kb { position: relative; margin: 0 auto; max-width: 100%; background: var(--board); border: 3px solid var(--board); padding: 9px; overflow-x: auto; box-shadow: 5px 5px 0 color-mix(in srgb, var(--shadow) 45%, transparent); }
+  #kb .kb-key { position: absolute; background: var(--key); color: var(--ink); border: 1px solid var(--board); box-shadow: 0 2px 0 color-mix(in srgb, var(--shadow) 55%, transparent); border-radius: 0; font-family: var(--term); font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 0; overflow: hidden; }
   /* The LED layer sits under .cap for the same reason .lvl does - it is added first and
      absolutely positioned, so the legend and the RT tag stay readable on top of it. */
   #kb .kb-key .led { position: absolute; inset: 0; pointer-events: none; }
@@ -199,47 +213,47 @@
      legend would vanish - keep it white. */
   #kb.lit.dual:not(.led-up) .kb-key.brightled .cap,
   #kb.lit.dual:not(.led-down) .kb-key.brightled .cap { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85); }
-  #kb .kb-key:hover { background: var(--accent); }
-  #kb .kb-key.selected, #kb .kb-key.ktdown { background: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
+  #kb .kb-key:hover { background: var(--accent); color: var(--on-accent); }
+  #kb .kb-key.selected, #kb .kb-key.ktdown { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--on-accent); }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
-  #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 13px; line-height: 1.15; background: var(--ink); color: var(--accent); }
+  #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 13px; line-height: 1.15; background: var(--sel-bg); color: var(--sel-fg); }
   #kb .kb-key.rt .tag { display: block; }
   /* A key holding an RT value under 0.1mm - the same line the form's own fields turn red
      at. The "!" carries it too: dark ink and this red sit close for red-green colour
      blindness, even though their brightness differs. */
-  #kb .kb-key.rt.rtlow:not(.advtag) .tag { background: var(--danger); color: var(--surface); }
+  #kb .kb-key.rt.rtlow:not(.advtag) .tag { background: var(--danger); color: var(--on-danger); }
   #kb .kb-key.rt.rtlow:not(.advtag) .tag::after { content: '!'; }
   /* Advanced keys: the chip names the binding (S1, S2... for SOCD pairs) instead, so the
      RT chip steps aside there rather than two meanings sharing one corner. */
   #kb.adv .kb-key.rt:not(.advtag) .tag { display: none; }
   #kb .kb-key.advtag .tag { display: block; }
   /* Live travel fill, driven by the Travel test poll. Rises from the bottom of the cap. */
-  #kb .kb-key .lvl { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--desk); }
+  #kb .kb-key .lvl { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--green); }
   #kb .kb-key .cap { position: relative; }
   /* A key that no longer sends what is printed on it says so, so you can see at a glance
      what you have changed and what to put back. */
-  #kb .kb-key.remapped { box-shadow: inset 0 -3px 0 var(--accent), 0 2px 0 rgba(18,53,43,.55); }
+  #kb .kb-key.remapped { box-shadow: inset 0 -3px 0 var(--accent), 0 2px 0 color-mix(in srgb, var(--shadow) 55%, transparent); }
   /* On the FN layer the board shows only what Fn actually does something with; the rest
      steps back rather than disappearing, so you can still see where you are aiming. */
   #kb .kb-key.nofn { opacity: .4; }
   /* While a key is being dragged out of the picker, every cap is a target. */
-  #kb.dropping .kb-key { outline: 1px dashed rgba(18,53,43,.45); outline-offset: -3px; }
-  #kb .kb-key.droptarget { background: var(--accent); outline: 2px solid var(--ink); outline-offset: -2px; }
+  #kb.dropping .kb-key { outline: 1px dashed color-mix(in srgb, var(--ink) 45%, transparent); outline-offset: -3px; }
+  #kb .kb-key.droptarget { background: var(--accent); color: var(--on-accent); outline: 2px solid var(--ink); outline-offset: -2px; }
   /* Follows the pointer so you can see what you are carrying. */
   .dragghost { position: fixed; z-index: 9; pointer-events: none; transform: translate(10px, 10px);
-               background: var(--ink); color: var(--accent); font-family: var(--term); font-size: 13px;
+               background: var(--board); color: var(--accent); font-family: var(--term); font-size: 13px;
                padding: 2px 7px; border: 2px solid var(--accent); }
   /* Calibration progress: a key the firmware has finished learning. */
-  #kb .kb-key.done { background: var(--desk); }
+  #kb .kb-key.done { background: var(--green); color: var(--on-accent); }
 
   /* The meter sits on an ink field so all three palette colours stay legible on it:
      amber marks where the key fires, green fills the travel above it. */
   /* The settings live in the centre panel, so the gauge gets the whole travel column
      to itself and grows into it. Everything inside it is positioned in percentages. */
   .gauge { position: relative; flex: 1; min-height: 120px; margin: 2px 0 12px; padding-left: 46px; }
-  .gauge-track { position: relative; width: 34px; height: 100%; background: var(--ink); border: 2px solid var(--ink); }
-  .seg { position: absolute; left: 0; right: 0; border-bottom: 2px solid var(--ink); background: #234A3E; }
-  .seg.lit { background: var(--desk); }
+  .gauge-track { position: relative; width: 34px; height: 100%; background: var(--board); border: 2px solid var(--board); }
+  .seg { position: absolute; left: 0; right: 0; border-bottom: 2px solid var(--board); background: var(--seg); }
+  .seg.lit { background: var(--green); }
   .tick { position: absolute; left: 0; right: 0; }
   .tick span { position: absolute; right: calc(100% + 9px); transform: translateY(-50%); font-size: 16px; color: var(--muted); }
   /* One marker now that normal mode has a single actuation point, so it spans the
@@ -250,7 +264,7 @@
   .mark span { position: absolute; left: calc(100% + 10px); transform: translateY(-50%); font-size: 17px; color: var(--ink); white-space: nowrap; }
   .mark span::before { content: '\25B8 '; }
   /* The live travel marker, distinct from the amber trigger mark it crosses. */
-  .mark.live { color: var(--surface); }
+  .mark.live { color: var(--live); }
   .mark.live span { color: var(--muted); }
 
   /* DKS timeline: matches the vendor's own screen - one row per output key, each drawing
@@ -263,7 +277,7 @@
   .dks-header { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 4px 22px 46px; }
   .dks-rows { display: flex; flex-direction: column; gap: 24px; }
   .dks-row { display: flex; align-items: center; gap: 10px; }
-  .dks-track { position: relative; flex: 1; height: 8px; margin: 0 20px; background: #FFF6E6; border: 2px solid var(--ink); user-select: none; }
+  .dks-track { position: relative; flex: 1; height: 8px; margin: 0 20px; background: var(--field); border: 2px solid var(--ink); user-select: none; }
   /* The seam between the press and release halves - purely a visual reference, not itself
      interactive. */
   .dks-track::after { content: ''; position: absolute; left: 50%; top: -5px; bottom: -5px; width: 2px; background: var(--ink); opacity: .35; }
@@ -283,21 +297,21 @@
 
   .field { margin-bottom: 11px; }
   .field label { display: block; font-size: 18px; color: var(--muted); margin-bottom: 3px; }
-  .field input, .field select { width: 100%; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 20px; }
+  .field input, .field select { width: 100%; padding: 5px 8px; border: 2px solid var(--ink); background: var(--field); color: var(--ink); font-family: var(--term); font-size: 20px; }
 
   /* Slider plus typed value. The spinner arrows are removed - the slider is the
      coarse control, the box is for exact entry. */
   .ctl { display: flex; align-items: center; gap: 9px; }
-  .ctl input[type=number] { width: 76px; flex: none; text-align: right; box-sizing: border-box; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 20px; }
+  .ctl input[type=number] { width: 76px; flex: none; text-align: right; box-sizing: border-box; padding: 5px 8px; border: 2px solid var(--ink); background: var(--field); color: var(--ink); font-family: var(--term); font-size: 20px; }
   input[type=number]::-webkit-inner-spin-button,
   input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 
   /* A text-mode scrollbar: square groove, square block for the handle. */
   input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; min-width: 0; width: auto; height: 24px; padding: 0; border: 0; background: transparent; cursor: pointer; }
-  input[type=range]::-webkit-slider-runnable-track { height: 16px; background: #FFF6E6; border: 2px solid var(--ink); }
+  input[type=range]::-webkit-slider-runnable-track { height: 16px; background: var(--field); border: 2px solid var(--ink); }
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 24px; margin-top: -6px; background: var(--accent); border: 2px solid var(--ink); border-radius: 0; }
-  input[type=range]::-moz-range-track { height: 16px; background: #FFF6E6; border: 2px solid var(--ink); }
+  input[type=range]::-moz-range-track { height: 16px; background: var(--field); border: 2px solid var(--ink); }
   input[type=range]::-moz-range-thumb { width: 13px; height: 22px; background: var(--accent); border: 2px solid var(--ink); border-radius: 0; }
 
   /* Real scrollbars get the same "square groove, square block" recipe as the range
@@ -307,15 +321,15 @@
      step buttons either, just track+thumb, so this keeps the same shape. */
   ::-webkit-scrollbar { width: 16px; height: 16px; }
   ::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
-  ::-webkit-scrollbar-track { background: #FFF6E6; border: 2px solid var(--ink); }
+  ::-webkit-scrollbar-track { background: var(--field); border: 2px solid var(--ink); }
   ::-webkit-scrollbar-thumb { background: var(--accent); border: 2px solid var(--ink); }
   ::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { background: var(--ink); }
-  ::-webkit-scrollbar-corner { background: #FFF6E6; }
+  ::-webkit-scrollbar-corner { background: var(--field); }
   /* The log is the one place this app inverts to a dark, terminal-style background - the
      light track above would clash sitting inside it, so it gets the same shapes in the
      log's own ink/desk/accent palette instead. */
-  #log::-webkit-scrollbar-track { background: var(--ink); border-color: var(--desk); }
-  #log::-webkit-scrollbar-thumb { background: var(--desk); border-color: var(--accent); }
+  #log::-webkit-scrollbar-track { background: var(--board); border-color: var(--green); }
+  #log::-webkit-scrollbar-thumb { background: var(--green); border-color: var(--accent); }
   #log::-webkit-scrollbar-thumb:hover, #log::-webkit-scrollbar-thumb:active { background: var(--accent); }
 
   .hint { margin: 0 0 12px; color: var(--muted); }
@@ -344,28 +358,28 @@
   .socd-edit { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; line-height: 1.2; }
   .socd-edit .hint { margin: 0; }
   .socd-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .socd-row input[type=number] { width: 64px; padding: 2px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 20px; text-align: right; }
+  .socd-row input[type=number] { width: 64px; padding: 2px 6px; border: 2px solid var(--ink); background: var(--field); color: var(--ink); font-family: var(--term); font-size: 20px; text-align: right; }
   /* Bind/Delete are secondary actions on an already-tight view, not the app's main call
      to action, so they don't need the full button size everything else gets. */
   .socd-edit .socd-row button { padding: 3px 11px; }
   .socd-list { flex: 0 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   #socdList { display: flex; flex-direction: column; gap: 4px; }
-  #socdList button { text-align: left; padding: 4px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--ink); }
-  #socdList button.on, #socdList button.on:hover { background: var(--ink); color: var(--accent); }
+  #socdList button { text-align: left; padding: 4px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--shadow); }
+  #socdList button.on, #socdList button.on:hover { background: var(--sel-bg); color: var(--sel-fg); }
   .socd-list .hint, .socd-list .muted { margin: 0; }
   .kp-block { display: flex; flex-direction: column; gap: 2px; }
   .kp-row { display: flex; gap: 2px; }
   .kp-row button { height: var(--kph, 17px); min-width: 0; padding: 0; line-height: 1;
                    font-size: calc(var(--kph, 17px) * 0.6);
-                   box-shadow: 1px 1px 0 var(--ink); overflow: hidden; }
-  .kp-row button.on, .kp-row button.on:hover { background: var(--ink); color: var(--accent); }
+                   box-shadow: 1px 1px 0 var(--shadow); overflow: hidden; }
+  .kp-row button.on, .kp-row button.on:hover { background: var(--sel-bg); color: var(--sel-fg); }
   .tab { min-width: 150px; padding: 5px 12px; font-size: 18px; text-align: center; box-shadow: none; }
-  .tab.active, .tab.active:hover { background: var(--ink); color: var(--accent); }
+  .tab.active, .tab.active:hover { background: var(--sel-bg); color: var(--sel-fg); }
 
   /* The mode is one switch, not a list of two - a toggle says so at a glance. */
   .toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .toggle .tog { border: 2px solid currentColor; padding: 1px 9px; }
-  .toggle[aria-pressed="true"], .toggle[aria-pressed="true"]:hover { background: var(--ink); color: var(--accent); }
+  .toggle[aria-pressed="true"], .toggle[aria-pressed="true"]:hover { background: var(--sel-bg); color: var(--sel-fg); }
 
   /* One control strip: the toggle and the sliders it governs share a row. The centre
      column is ~1040px wide, so horizontal space is the free kind here - and giving the
@@ -375,12 +389,12 @@
   .readout { display: flex; gap: 22px; flex-wrap: wrap; align-items: baseline; }
   .readout b { font-weight: normal; font-size: 22px; }
   .muted { color: var(--muted); }
-  .readout .ok { color: var(--ink); background: var(--desk); padding: 0 5px; }
-  .readout .bad { color: var(--accent); background: var(--ink); padding: 0 5px; }
+  .readout .ok { color: var(--on-accent); background: var(--green); padding: 0 5px; }
+  .readout .bad { color: var(--sel-fg); background: var(--sel-bg); padding: 0 5px; }
   #ttChecks { margin-top: 6px; }
   /* Calibration rewrites every key's stored axis data, so its screen is styled to be
      read before it is clicked, not after. */
-  .warn { border: 2px solid var(--ink); background: var(--accent); padding: 3px 8px; margin: 0 0 2px; }
+  .warn { border: 2px solid var(--ink); background: var(--accent); color: var(--on-accent); padding: 3px 8px; margin: 0 0 2px; }
   /* Button and status share a row: giving the status its own line pushed this view 8px
      past the 142px the centre panel has. */
   .calrow { display: flex; align-items: center; gap: 14px; }
@@ -392,13 +406,13 @@
   .lightrow { display: flex; align-items: center; gap: 14px; margin-bottom: 5px; }
   .lightrow .toggle { margin-bottom: 0; width: 200px; flex: none; }
   .lightrow .hint { margin: 0; }
-  .lightrow select { padding: 4px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 20px; }
+  .lightrow select { padding: 4px 8px; border: 2px solid var(--ink); background: var(--field); color: var(--ink); font-family: var(--term); font-size: 20px; }
   /* Longer label than the other toggle on this row (Lighting) needs more than its 200px. */
   #customPaintToggle { width: 250px; }
   #customBrush { width: 42px; height: 32px; padding: 2px; border: 2px solid var(--ink); background: var(--surface); cursor: pointer; flex: none; }
   .pick { display: flex; gap: 4px; flex-wrap: wrap; }
-  .pick button { padding: 3px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--ink); min-width: 34px; }
-  .pick button.on, .pick button.on:hover { background: var(--ink); color: var(--accent); }
+  .pick button { padding: 3px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--shadow); min-width: 34px; }
+  .pick button.on, .pick button.on:hover { background: var(--sel-bg); color: var(--sel-fg); }
   /* The LED layer buttons draw the same two edge strips the board does, so the control
      and the keys read as one picture: a filled band is a lit LED. currentColor, so the
      selected (inverted) button's icon inverts with it. */
@@ -418,8 +432,8 @@
   #socdMode button { padding: 2px 7px; }
   .swatch { width: 26px; height: 26px; min-width: 0; padding: 0; box-shadow: none; }
   .swatch.on { outline: 3px solid var(--accent); outline-offset: -6px; }
-  .danger { background: var(--accent); }
-  .danger[data-armed="1"] { background: var(--ink); color: var(--accent); }
+  .danger { background: var(--accent); color: var(--on-accent); }
+  .danger[data-armed="1"] { background: var(--sel-bg); color: var(--sel-fg); }
   /* The two groups are only there to be shown and hidden - their fields must still be
      items of the grid above, not of a box inside it. */
   #normalFields, #rtFields { display: contents; }
@@ -433,7 +447,7 @@
      wins the cascade instead of losing silently to the base ink/muted color. */
   .field input.rt-unstable, .field label.rt-unstable { color: var(--danger); }
 
-  #log { background: var(--ink); color: var(--desk); font-family: var(--term); font-size: 16px; line-height: 1.25; padding: 11px; height: 100%; overflow-y: auto; white-space: pre-wrap; }
+  #log { background: var(--board); color: var(--green); font-family: var(--term); font-size: 16px; line-height: 1.25; padding: 11px; height: 100%; overflow-y: auto; white-space: pre-wrap; }
 
   @media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } button:active { transform: none; } }
