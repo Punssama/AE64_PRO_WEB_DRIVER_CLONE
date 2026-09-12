@@ -222,7 +222,7 @@
   /* Slider plus typed value. The spinner arrows are removed - the slider is the
      coarse control, the box is for exact entry. */
   .ctl { display: flex; align-items: center; gap: 9px; }
-  .ctl input[type=number] { width: 76px; flex: none; text-align: right; }
+  .ctl input[type=number] { width: 76px; flex: none; text-align: right; box-sizing: border-box; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
   input[type=number]::-webkit-inner-spin-button,
   input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; appearance: textfield; }
