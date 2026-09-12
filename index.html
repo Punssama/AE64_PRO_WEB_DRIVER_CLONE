@@ -3636,17 +3636,21 @@ document.getElementById('remapDefaults').onclick = async (e) => {
   const defRows = layerDef(remapLayer);
   if (!device || !defRows) return;
   saveState('Restoring...', true);
-  let n = 0, bad = 0;
+  // Read the layer fresh and write only the keys that differ from the factory layout - a
+  // board with two remaps gets two writes, not 64. A failed read writes all of them.
+  const cur = (await refreshKeymap(remapLayer)) ? layerCur(remapLayer) : null;
+  let n = 0, bad = 0, same = 0;
   for (const rc of KEY_LABEL.keys()) {
     const [r, c] = rc.split('-').map(Number);
     // Not `if (!want) continue` - on the FN layer most factory values ARE 0, and skipping
     // them would leave every Fn binding in place and call it a restore.
     const want = defRows[r] ? defRows[r][c] : undefined;
     if (want === undefined) continue;
+    if (cur?.[r]?.[c] === want) { same++; continue; }
     const after = await setKeyCode(r, c, want, remapLayer);
     if (after && after.code === want) n++; else bad++;
   }
-  log('Remap: restored ' + n + ' keys' + (bad ? ', ' + bad + ' FAILED' : ''));
+  log('Remap: restored ' + n + ' keys' + (same ? ', ' + same + ' were already factory' : '') + (bad ? ', ' + bad + ' FAILED' : ''));
   saveState(bad ? 'Restore incomplete' : 'Factory layout restored', !!bad);
   await refreshKeymap();
   renderRemap();
@@ -3826,8 +3830,8 @@ async function restoreBackup(data) {
     const rows = data.keymap?.[layer];
     if (!rows) continue;
     if (!layerCache[layer]) await loadKeymap(layer);
-    await refreshKeymap(layer);
-    const cur = layerCache[layer]?.cur;
+    // Skips are only decided on a fresh read - a failed one writes everything, as before.
+    const cur = (await refreshKeymap(layer)) ? layerCache[layer]?.cur : null;
     for (const [rc] of KEY_LAYOUT) {
       const [row, col] = rcOf(rc);
       const code = rows[row]?.[col];
