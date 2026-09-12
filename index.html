@@ -1971,6 +1971,9 @@ document.getElementById('shakeToggle').onclick = () => setShakeOpt(!shakeOptOn);
 
 // axisFields must come from a live getPerformance() on the same key.
 // Zeroing them (instead of preserving) wipes that key's stored axis calibration on real hardware.
+// The fields a Set writes from the form; the rest of the packet is the key's calibration.
+const PERF_SETTINGS = ['mode', 'normalPress', 'normalRelease', 'rtFirstTouch', 'rtPress', 'rtRelease', 'pressDeadStroke', 'releaseDeadStroke'];
+
 function perfSetPacket(row, col, cfg, axisFields) {
   return [
     CATEGORY.Performance, PERF_SUB.SetPerformance, row, col, cfg.mode,
@@ -3736,7 +3739,9 @@ async function buildBackup() {
   }
   for (const layer of [0, 1]) {
     if (!layerCache[layer]) await loadKeymap(layer);
-    if (!layerCache[layer]?.cur) await refreshKeymap(layer);
+    // Always re-read (6 packets a layer): a cached layer could predate writes the cache never
+    // saw, and verifyRestore() compares against this - it has to be what the keyboard holds.
+    await refreshKeymap(layer);
   }
   const keymap = { 0: layerCache[0]?.cur, 1: layerCache[1]?.cur };
   if (!advCache) await loadAdvancedKeys();
@@ -3774,7 +3779,8 @@ async function verifyRestore(before) {
   for (const [rc, cfg] of Object.entries(before.perf || {})) {
     const a = after.perf[rc];
     if (!a || !cfg) continue;
-    for (const k of Object.keys(cfg)) if (Math.abs((a[k] ?? 0) - cfg[k]) > 0.0005) diffs.push(`${rc}.${k}`);
+    // Settings only: the axis fields are the key's own calibration, which a restore keeps.
+    for (const k of PERF_SETTINGS) if (Math.abs((a[k] ?? 0) - cfg[k]) > 0.0005) diffs.push(`${rc}.${k}`);
   }
   for (const layer of [0, 1]) for (let r = 0; r < 6; r++) for (let c = 0; c < 21; c++) {
     if ((before.keymap[layer]?.[r]?.[c] ?? 0) !== (after.keymap[layer]?.[r]?.[c] ?? 0)) diffs.push(`keymap L${layer} ${r}-${c}`);
@@ -3788,48 +3794,85 @@ async function verifyRestore(before) {
 // guessed at.
 async function restoreBackup(data) {
   saveState('Restoring...', true);
-  let ok = 0, failed = 0;
+  // `same` counts values the keyboard already holds: nothing is sent for those, since every
+  // write lands in the keyboard's storage and rewriting an identical value buys nothing.
+  let ok = 0, failed = 0, same = 0;
   for (const [rc, cfg] of Object.entries(data.perf || {})) {
     if (!cfg) continue;
     const [row, col] = rcOf(rc);
-    (await sendAndWait(perfSetPacket(row, col, cfg, cfg))) ? ok++ : failed++;
+    // The key's CURRENT axis fields go out with the file's settings, never the file's own:
+    // those are the calibration as it stood when the backup was taken, and calibration is
+    // not part of a backup - writing them back would undo any recalibration since then
+    // (or impose another board's). This used to send the file's.
+    const cur = await getPerformanceRaw(row, col);
+    if (!cur) { failed++; continue; }
+    if (PERF_SETTINGS.every(k => Math.abs(cur[k] - cfg[k]) < 0.0005)) { same++; continue; }
+    (await sendAndWait(perfSetPacket(row, col, cfg, cur))) ? ok++ : failed++;
   }
   for (const layer of [0, 1]) {
     const rows = data.keymap?.[layer];
     if (!rows) continue;
+    if (!layerCache[layer]) await loadKeymap(layer);
+    await refreshKeymap(layer);
+    const cur = layerCache[layer]?.cur;
     for (const [rc] of KEY_LAYOUT) {
       const [row, col] = rcOf(rc);
       const code = rows[row]?.[col];
       if (code === undefined) continue;
+      if (cur?.[row]?.[col] === code) { same++; continue; }
       (await setKeyCode(row, col, code, layer)) ? ok++ : failed++;
     }
   }
+  if (!advCache) await loadAdvancedKeys();
   for (const [rc, hk] of Object.entries(data.adv || {})) {
     const pkt = higherKeyWritePacket(rc, hk);
     if (!pkt) { failed++; continue; }
+    const now = advCache?.get(rc);
+    if (now && String(higherKeyWritePacket(rc, now)) === String(pkt)) { same++; continue; }
     (await sendAndWait(pkt)) ? ok++ : failed++;
   }
+  const areaBefore = lightArea;
   for (const [area, entry] of Object.entries(data.lighting?.areas || {})) {
     if (!entry.state) continue;
+    const now = await getLighting(Number(area));
+    if (now && JSON.stringify(now) === JSON.stringify(entry.state)) { lightStates[area] = now; same++; continue; }
     lightArea = Number(area);
     lightState = entry.state;
     await setLighting(entry.state);
   }
+  // Leave the Lighting view on the area it was showing, not the last one restored.
+  lightArea = areaBefore;
+  lightState = lightStates[lightArea] || lightState;
   if (data.lighting?.custom) {
-    customColors.clear();
-    for (const [rc, c] of data.lighting.custom) customColors.set(rc, c);
-    const n = ledPackets[AREA.Keyboard] || 0;
-    for (let p = 0; p < n; p++) sendCustomPacket(p);
-  }
-  if (Number.isInteger(data.rate)) {
-    const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Write, data.rate]);
-    if (res) { rateSel = data.rate; renderRates(); }
+    if (!customLoaded) await loadCustomColors();
+    const want = new Map(data.lighting.custom);
+    const unchanged = want.size === customColors.size && [...want].every(([rc, c]) => {
+      const n = customColors.get(rc);
+      return n && n.r === c.r && n.g === c.g && n.b === c.b;
+    });
+    if (unchanged) same++;
+    else {
+      customColors.clear();
+      for (const [rc, c] of want) customColors.set(rc, c);
+      const n = ledPackets[AREA.Keyboard] || 0;
+      for (let p = 0; p < n; p++) sendCustomPacket(p);
+    }
   }
   invalidateAdvanced();
   await loadAllModes();
   if (selected.size) await fillFormFrom(selected.values().next().value);
   const diffs = await verifyRestore(data);
+  paintCaps(); // the keycap legends draw from the keymap verifyRestore() just re-read
+  log(`Restore: ${ok} written, ${same} already matched the file${failed ? `, ${failed} FAILED` : ''}.`);
   saveState(`Restore done: ${ok} writes ok${failed ? `, ${failed} FAILED` : ''}${diffs.length ? `, ${diffs.length} differ` : ''}`, !!(failed || diffs.length));
+  // Last, and only if it differs: a polling-rate write makes the keyboard drop off USB and
+  // reconnect, which in the middle of the restore took every read after it down too -
+  // the verification pass included.
+  if (Number.isInteger(data.rate) && data.rate !== rateSel) {
+    log(`Restore: polling rate ${RATES[rateSel]} -> ${RATES[data.rate]}; the keyboard reconnects now.`);
+    const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Write, data.rate]);
+    if (res) { rateSel = data.rate; renderRates(); }
+  }
 }
 
 let backupData = null;
@@ -4929,7 +4972,10 @@ if (location.search.includes('selftest')) {
   console.assert(isRtLow({ rtFirstTouch: 0.3, rtPress: 0.099, rtRelease: 0.2 }), 'an RT value under 0.1mm turns the chip red');
   console.assert(!isRtLow({ rtFirstTouch: 0.1, rtPress: 0.1, rtRelease: 0.1 }), 'exactly 0.1mm does not - the same strict line the fields use');
   console.assert(eq([0, 1, 2, 3].map(ledLayerOf), [{ up: false, down: false }, { up: false, down: true }, { up: true, down: false }, { up: true, down: true }]),
-    'LED layer byte: Close / OpenDown = lower / OpenUp = upper / Open = both');
+    'LED layer byte: Close / OpenDown = bottom / OpenUp = top / Open = both');
+  // A restore skips keys whose PERF_SETTINGS already match - a field readCfg() writes but this
+  // list misses would make that skip leave a wrong value in place.
+  console.assert(eq(Object.keys(readCfg()).sort(), [...PERF_SETTINGS].sort()), 'PERF_SETTINGS lists exactly the fields a performance write sets');
 
   {
     // The dark palette has to reach the elements, not just exist: flip the attribute and
