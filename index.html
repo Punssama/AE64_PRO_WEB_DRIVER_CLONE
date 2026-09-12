@@ -155,7 +155,7 @@
   #saveState:not(:empty)::before { content: '\2713 '; }
   #saveState.busy::before { content: ''; }
 
-  .sidebar { display: flex; flex-direction: column; gap: 7px; min-height: 0; overflow-y: auto; }
+  .sidebar { display: flex; flex-direction: column; gap: 7px; min-height: 0; overflow-y: auto; margin-right: -8px; padding-right: 8px; }
   /* The device's own 4 stored configs. First thing in the sidebar because it is the
      widest scope on screen: every view below it edits whichever config is picked here. */
   #configPicker { display: flex; flex-direction: column; gap: 3px; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 2px solid var(--line); }
@@ -179,7 +179,10 @@
   /* min-width 0 for the same reason as .kbpanel: a wide view scrolls inside its own box
      instead of widening the column and sliding under the Travel panel. */
   .viewpanel { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
-  .view { flex: 1; min-height: 0; overflow: auto; }
+  /* The scrollbar sits inside the box's padding edge, so a right padding is the gap between
+     it and the fields; the matching negative margin lends that padding from the panel's
+     own, so nothing moves when there is nothing to scroll. */
+  .view { flex: 1; min-height: 0; overflow: auto; margin-right: -6px; padding-right: 6px; }
   /* Column so Apply stays pinned at the bottom - it must not jump when the taller
      Rapid-trigger tab swaps in for the shorter Dead-zone one. */
   .travel { min-height: 0; display: flex; flex-direction: column; }
@@ -233,18 +236,21 @@
      or a dark legend on a bright key sits in its own muddy halo. */
   #kb.lit .kb-key .cap { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85); }
   #kb.lit .kb-key.brightled .cap { color: #14201b; text-shadow: 0 1px 2px rgba(255,255,255,.7); }
-  /* Dual-LED boards: each socket has an upper LED, which backlights the keycap, and a
-     lower one, which lights the plate around the switch - so the mirror draws them where
-     they land. Upper LED = the lit face; lower LED = a ring of light in the gap around the
-     key (paintLedLayer sets which). With its upper LED off a face drops to an unlit keycap
-     whatever the frame says: the firmware keeps reporting the effect colour for keys whose
-     upper LED is off (seen on the real board), so only the layer byte knows what is lit.
-     The ring is a hard 2px spread, no blur: caps sit ~3.85px apart, so neighbouring rings
-     meet in the gap as one lit grid without spilling onto either face. */
-  #kb.lit.dual:not(.led-up) .kb-key .led::before { content: ''; position: absolute; inset: 0; background: var(--key-unlit); }
-  #kb.lit.dual:not(.led-up) .kb-key .cap,
-  #kb.lit.dual:not(.led-up) .kb-key.brightled .cap { color: var(--legend-unlit); text-shadow: none; }
-  #kb.lit.dual.led-down .kb-key { box-shadow: 0 0 0 2px var(--led, transparent); }
+  /* Dual-LED boards: every switch has two LEDs, one above it and one below, so each lights
+     its own half of the cap - top LED the upper half, bottom LED the lower half, both the
+     whole cap (paintLedLayer sets led-up / led-down). A half whose LED is off is covered by
+     an unlit keycap whatever the frame says: the firmware keeps reporting the effect colour
+     for keys whose LED is switched off (seen on the real board), so only the layer byte
+     knows what is lit. The effect still animates underneath, in the half that is lit. */
+  #kb.lit.dual:not(.led-up) .kb-key .led::before,
+  #kb.lit.dual:not(.led-down) .kb-key .led::before { content: ''; position: absolute; inset: 0; background: var(--key-unlit); }
+  #kb.lit.dual.led-up .kb-key .led::before { top: 50%; }
+  #kb.lit.dual.led-down .kb-key .led::before { bottom: 50%; }
+  /* A half-lit legend straddles a lit half and a dark one, so neither white nor dark ink
+     reads on both - a light legend with a hard 1px dark outline does. */
+  #kb.lit.dual.led-up:not(.led-down) .kb-key .cap,
+  #kb.lit.dual.led-down:not(.led-up) .kb-key .cap { color: #fff; text-shadow: 1px 0 #000, -1px 0 #000, 0 1px #000, 0 -1px #000; }
+  #kb.lit.dual:not(.led-up):not(.led-down) .kb-key .cap { color: var(--legend-unlit); text-shadow: none; }
   #kb .kb-key:hover { background: var(--accent); color: var(--on-accent); }
   #kb .kb-key.selected, #kb .kb-key.ktdown { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--on-accent); }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
@@ -351,7 +357,7 @@
      Chromium-only anyway, so the -webkit- pseudo-elements always apply where it matters.
      End buttons are hidden rather than styled as tiny arrows: the range slider has no
      step buttons either, just track+thumb, so this keeps the same shape. */
-  ::-webkit-scrollbar { width: 16px; height: 16px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
   ::-webkit-scrollbar-track { background: var(--field); border: 2px solid var(--line); }
   ::-webkit-scrollbar-thumb { background: var(--accent); border: 2px solid var(--line); }
@@ -463,13 +469,13 @@
   .pick { display: flex; gap: 4px; flex-wrap: wrap; }
   .pick button { padding: 3px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--shadow); min-width: 34px; }
   .pick button.on, .pick button.on:hover { background: var(--sel-bg); color: var(--sel-fg); }
-  /* The LED layer buttons draw the same picture as the keys: a small keycap whose face
-     fills when the upper LED is on, inside a ring that shows when the lower one is.
-     currentColor, so the selected (inverted) button's icon inverts with it. */
-  .layer-ico { position: relative; display: inline-block; width: 16px; height: 16px; margin-right: 7px; vertical-align: -3px; border: 2px solid transparent; }
-  .layer-ico.down { border-color: currentColor; }
-  .layer-ico::before { content: ''; position: absolute; inset: 2px; border: 2px solid currentColor; }
-  .layer-ico.up::before { background: currentColor; }
+  /* The LED buttons draw the same picture as the keys: a small cap whose upper half fills
+     for the top LED and lower half for the bottom one. currentColor, so the selected
+     (inverted) button's icon inverts with it. */
+  .layer-ico { position: relative; display: inline-block; width: 16px; height: 16px; margin-right: 7px; vertical-align: -3px; border: 2px solid currentColor; }
+  .layer-ico.up::before, .layer-ico.down::before { content: ''; position: absolute; inset: 2px; background: currentColor; }
+  .layer-ico.up:not(.down)::before { bottom: 50%; }
+  .layer-ico.down:not(.up)::before { top: 50%; }
   /* Lighting had every control (area, 20-effect picker, five parameter fields, custom
      paint) packed edge to edge with no grouping - same small-caps label already used for
      the sidebar's own TRIGGER/KEYS/DEVICE groups, plus real spacing between groups, so
@@ -2786,14 +2792,18 @@ function renderLighting() {
   const showLayer = dualLighting && lightArea === AREA.Keyboard;
   document.getElementById('lightLedLayerField').hidden = !showLayer;
   if (showLayer) {
-    const layerLabel = ['Off', 'Lower', 'Upper', 'Both'];
-    const layerTitle = ['Both LEDs off', 'Lower LED only - lights around the key',
-                        'Upper LED only - lights the keycap', 'Upper and lower LED'];
+    // Buttons in reading order (Off, Top, Bottom, Both); the values are LIGHT_OPEN's
+    // (OpenUp = 2 is the top LED, OpenDown = 1 the bottom one - the vendor's own
+    // "Upper/Lower Lighting Switch").
+    const order = [LIGHT_OPEN.Close, LIGHT_OPEN.OpenUp, LIGHT_OPEN.OpenDown, LIGHT_OPEN.Open];
+    const layerLabel = ['Off', 'Top', 'Bottom', 'Both'];
+    const layerTitle = ['Both LEDs off', 'Top LED only - lights the upper half of each key',
+                        'Bottom LED only - lights the lower half of each key', 'Top and bottom LED'];
     const row = document.getElementById('lightLedLayer');
-    pickRow(row, layerLabel.length, st ? st.open : -1,
-            i => layerLabel[i], i => setLighting({ open: i }), !st);
+    pickRow(row, order.length, st ? order.indexOf(st.open) : -1,
+            i => layerLabel[i], i => setLighting({ open: order[i] }), !st);
     [...row.children].forEach((b, i) => {
-      const { up, down } = ledLayerOf(i);
+      const { up, down } = ledLayerOf(order[i]);
       const ico = document.createElement('span');
       ico.className = 'layer-ico' + (up ? ' up' : '') + (down ? ' down' : '');
       b.prepend(ico);
@@ -2992,9 +3002,6 @@ async function ledLoop() {
       if (kbFrame) for (const [rc, el] of keyEl) {
         const f = kbFrame[ledIndex.get(rc)];
         el.firstChild.style.background = f ? f.css : '';
-        // The same colour again on the key itself, for the lower-LED ring drawn outside it -
-        // the .led layer inside can't paint there, since the cap clips its children.
-        el.style.setProperty('--led', f ? f.css : 'transparent');
         el.classList.toggle('brightled', !!f && f.bright);
       }
       if (stripLeds) {
@@ -3028,7 +3035,6 @@ async function ledLoop() {
 function ledClear() {
   for (const el of keyEl.values()) {
     el.firstChild.style.background = '';
-    el.style.removeProperty('--led');
     el.classList.remove('brightled');
   }
   document.getElementById('kb').classList.remove('lit');
