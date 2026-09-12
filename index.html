@@ -258,6 +258,11 @@
      active state as the sidebar, so "where am I" reads the same way everywhere. */
   .tabs { display: flex; gap: 6px; margin-bottom: 12px; align-items: center; }
   .tabs .hint { margin: 0; }
+  /* Same pattern as .titlebar/.statusbar's own .spacer - Remap's tabs row is the only
+     other place a spacer pushes something to the far edge, and it was missing this rule
+     entirely, so "Restore base layer" just sat wherever it fell in the flex row instead
+     of being pinned right. */
+  .tabs .spacer { flex: 1; }
   /* The key picker is drawn as a keyboard, so there is nothing to scroll and nothing to
      hunt for - the key you want is where your fingers expect it. */
   /* The picker is the tallest thing in this view, so its tab strip gets a tighter gap
@@ -4111,6 +4116,13 @@ function layoutDksMarkers(entries, travel, track) {
     maxLevel = Math.max(maxLevel, level);
     entries[i].el.style.left = pct + '%';
     entries[i].lineEl.style.height = (DKS_LINE_BASE + level * DKS_LINE_STEP) + 'px';
+    // A stacked (level>0) marker's line is tall enough to run right past a lower-level
+    // marker sharing its X - that's the point, it has to reach all the way down to the
+    // track. Left to DOM order, whichever row comes later in spec.rows would paint on
+    // top regardless of level, so a short level-0 box could end up UNDER a taller
+    // neighbor's line. Giving lower levels a higher z-index keeps their opaque tag/box
+    // in front, so a longer line visually passes behind them instead of through them.
+    entries[i].el.style.zIndex = String(100 - level);
     prevPct = pct;
   }
   track.style.marginTop = (DKS_MARKER_H + DKS_LINE_BASE + maxLevel * DKS_LINE_STEP + 10) + 'px';
