@@ -363,6 +363,7 @@
     <span class="navgroup">KEYS</span>
     <button class="navbtn" data-view="remap">Remap keys</button>
     <button class="navbtn" data-view="adv">Advanced keys</button>
+    <button class="navbtn" data-view="macro">Macros</button>
     <span class="navgroup">DEVICE</span>
     <button class="navbtn" data-view="light">Lighting</button>
     <button class="navbtn" data-view="rate">Polling rate</button>
@@ -659,6 +660,31 @@
       </div>
     </div>
 
+    <div class="view" id="view-macro" hidden>
+      <div class="socd">
+        <div class="socd-edit">
+          <p class="hint" id="macroHint">Connect the keyboard first.</p>
+          <div class="socd-row readout"><span><span class="muted">Slot</span> <b id="macroSlotLabel">--</b></span></div>
+          <div class="socd-row">
+            <button id="macroRecord" disabled>Record</button>
+            <button id="macroPlay" disabled>Preview in browser</button>
+            <label class="muted" for="macroRepeat">Repeat</label>
+            <input id="macroRepeat" type="number" min="1" max="255" value="1">
+          </div>
+          <div id="macroSteps"></div>
+          <p class="hint">Binding a macro to a physical key is not wired yet - the keycode the firmware expects for "run macro N" is unconfirmed. Record, save, and preview already work.</p>
+          <div class="socd-row">
+            <button id="macroSave" disabled>Save to slot</button>
+            <button id="macroDelete" disabled>Delete slot</button>
+          </div>
+        </div>
+        <div class="socd-list">
+          <p class="muted">Macro slots</p>
+          <div id="macroList"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="view" id="view-light" hidden>
       <div class="lightrow">
         <button id="lightToggle" class="toggle" aria-pressed="false">
@@ -726,7 +752,8 @@ const KEY_SUB = { GetRow: 1, SetRow: 2, GetCode: 3, SetCode: 4, Style: 5, Defaul
 const MACRO_SUB = { GetMode: 1, SetMode: 2, GetData: 3, SetData: 4 };
 // The firmware itself caps a macro step's delay here - the vendor bundle throws above it.
 const MACRO_DELAY_MAX = 32767;
-const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5, CalibrationSetting: 6, ShakeOptimizationSwitch: 16, SystemSetting: 4 };
+const MACRO_ACTIONS_PER_PACKET = 15; // 60 of the 64 bytes hold actions; the leading 4 are the header.
+const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5, CalibrationSetting: 6, ShakeOptimizationSwitch: 16, SystemSetting: 4, MacroSpaceInfoQuery: 14 };
 // ConfigSwitch's third byte is NOT the QR enum the other commands use: 0/1/2 line up
 // with ReadList/Read/Write, but 3 and 4 are name get/set, which QR has no values for.
 const CFG_OP = { List: 0, Read: 1, Switch: 2, GetName: 3, SetName: 4 };
@@ -1172,6 +1199,7 @@ for (const btn of document.querySelectorAll('.navbtn')) {
       renderAllAdv();
       if (device && !advCache) loadAdvancedKeys();
     }
+    if (btn.dataset.view === 'macro' && device) loadMacroList();
     socdListen(btn.dataset.view === 'adv');
     // Every view, not just the others: entering remap on the FN tab has to repaint too.
     paintCaps();
@@ -1811,6 +1839,169 @@ function unpackAction(b, i = 0) {
   const v = (b[i] | b[i + 1] << 8 | b[i + 2] << 16 | b[i + 3] << 24) >>> 0;
   return { down: v >>> 31 === 1, delay: (v >>> 16) & MACRO_DELAY_MAX, code: v & 0xffff };
 }
+
+// ---- Macro data layer ---------------------------------------------------------------
+// Mirrors the vendor's own GetMacroMode/SetMacroMode/GetMacro/SetMacro framing
+// ({GetMacroMode:1,SetMacroMode:2,GetMacro:3,SetMacro:4} in their bundle - an exact match
+// for MACRO_SUB above).
+function macroModePacket(op, macroId, meta) {
+  const head = [CATEGORY.Macro, op, macroId];
+  return op === MACRO_SUB.SetMode ? [...head, meta.valid ? 1 : 0, ...u16le16bit(meta.actNum), ...u16le16bit(meta.repNum), meta.mode] : head;
+}
+function parseMacroMode(res) {
+  return { macroId: res[2], valid: res[3] === 1, actNum: res[4] | res[5] << 8, repNum: res[6] | res[7] << 8, mode: res[8] };
+}
+async function getMacroMode(macroId) {
+  const res = await sendAndWait(macroModePacket(MACRO_SUB.GetMode, macroId), 500, true);
+  return res ? parseMacroMode(res) : null;
+}
+async function setMacroMode(macroId, meta) {
+  const res = await sendAndWait(macroModePacket(MACRO_SUB.SetMode, macroId, meta));
+  return res ? parseMacroMode(res) : null;
+}
+function macroDataPacket(op, macroId, offset, actions) {
+  const head = [CATEGORY.Macro, op, macroId, offset];
+  return op === MACRO_SUB.SetData ? [...head, ...actions.flatMap(packAction)] : head;
+}
+async function getMacroActions(macroId, actNum) {
+  const pages = Math.max(1, Math.ceil(actNum / MACRO_ACTIONS_PER_PACKET));
+  const out = [];
+  for (let p = 0; p < pages; p++) {
+    const res = await sendAndWait(macroDataPacket(MACRO_SUB.GetData, macroId, p), 500, true);
+    if (!res) return null;
+    for (let i = 0; i < MACRO_ACTIONS_PER_PACKET && out.length < actNum; i++) out.push(unpackAction(res, 4 + i * 4));
+  }
+  return out;
+}
+async function setMacroActions(macroId, actions) {
+  const pages = Math.ceil(actions.length / MACRO_ACTIONS_PER_PACKET) || 1;
+  for (let p = 0; p < pages; p++) {
+    const slice = actions.slice(p * MACRO_ACTIONS_PER_PACKET, (p + 1) * MACRO_ACTIONS_PER_PACKET);
+    if (!(await sendAndWait(macroDataPacket(MACRO_SUB.SetData, macroId, p, slice)))) return false;
+  }
+  return true;
+}
+let macroSlotCount = 16; // fallback if the space-info read below is unavailable/implausible
+async function loadMacroSpace() {
+  // ponytail: macroCount's exact meaning (total slots vs. slots in use) isn't spelled out
+  // anywhere found - treated as a slot count by analogy with configCount, which reads the
+  // same way (byte 3 of a Global reply). Sanity-clamped, not trusted blindly.
+  const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.MacroSpaceInfoQuery, 0], 600, true);
+  if (res && res[3] > 0 && res[3] <= 64) macroSlotCount = res[3];
+  else log('Macro: space-info query did not answer usefully - assuming ' + macroSlotCount + ' slots.');
+}
+
+// ---- Macro editor UI ------------------------------------------------------------
+let macroCache = new Map(); // macroId -> parseMacroMode() result
+let macroSelected = null, macroSteps = [], macroRecording = false, macroLastTime = 0;
+
+async function loadMacroList() {
+  if (!device) return;
+  document.getElementById('macroHint').textContent = 'Reading macro slots...';
+  await loadMacroSpace();
+  macroCache.clear();
+  for (let id = 0; id < macroSlotCount; id++) {
+    const meta = await getMacroMode(id);
+    if (meta) macroCache.set(id, meta);
+  }
+  document.getElementById('macroHint').textContent = macroSelected == null ? 'Pick a slot on the right.' : '';
+  renderMacroList();
+}
+function renderMacroList() {
+  const el = document.getElementById('macroList');
+  el.innerHTML = '';
+  for (let id = 0; id < macroSlotCount; id++) {
+    const meta = macroCache.get(id);
+    const b = document.createElement('button');
+    b.className = id === macroSelected ? 'on' : '';
+    b.textContent = `Slot ${id}` + (meta?.valid ? ` (${meta.actNum} steps)` : '');
+    b.onclick = () => selectMacroSlot(id);
+    el.appendChild(b);
+  }
+}
+async function selectMacroSlot(id) {
+  macroSelected = id;
+  document.getElementById('macroHint').textContent = '';
+  document.getElementById('macroSlotLabel').textContent = 'Slot ' + id;
+  const meta = macroCache.get(id);
+  macroSteps = meta?.valid ? (await getMacroActions(id, meta.actNum)) || [] : [];
+  document.getElementById('macroRepeat').value = meta?.repNum || 1;
+  renderMacroSteps();
+  renderMacroList();
+  for (const b of ['macroRecord', 'macroPlay', 'macroSave', 'macroDelete']) document.getElementById(b).disabled = !device;
+}
+function renderMacroSteps() {
+  const el = document.getElementById('macroSteps');
+  el.innerHTML = '';
+  macroSteps.forEach((a, i) => {
+    const row = document.createElement('div');
+    row.className = 'socd-row';
+    row.innerHTML = `<span>${a.down ? 'Down' : 'Up'} ${hidName(a.code) || kpLabel(a.code) || ('code ' + a.code)} +${a.delay}ms</span>`;
+    const del = document.createElement('button');
+    del.textContent = 'x';
+    del.onclick = () => { macroSteps.splice(i, 1); renderMacroSteps(); };
+    row.appendChild(del);
+    el.appendChild(row);
+  });
+}
+
+// KeyboardEvent.code -> HID usage ID: this is the public UI Events / USB HID mapping
+// (the browser spec deliberately mirrors HID usages here), not anything vendor-specific -
+// the same direction hidName() already goes, just inverted. Extend on demand.
+const CODE_TO_HID = {
+  KeyA: 4, KeyB: 5, KeyC: 6, KeyD: 7, KeyE: 8, KeyF: 9, KeyG: 10, KeyH: 11, KeyI: 12, KeyJ: 13,
+  KeyK: 14, KeyL: 15, KeyM: 16, KeyN: 17, KeyO: 18, KeyP: 19, KeyQ: 20, KeyR: 21, KeyS: 22, KeyT: 23,
+  KeyU: 24, KeyV: 25, KeyW: 26, KeyX: 27, KeyY: 28, KeyZ: 29,
+  Digit1: 30, Digit2: 31, Digit3: 32, Digit4: 33, Digit5: 34, Digit6: 35, Digit7: 36, Digit8: 37, Digit9: 38, Digit0: 39,
+  Enter: 40, Escape: 41, Backspace: 42, Tab: 43, Space: 44,
+  F1: 58, F2: 59, F3: 60, F4: 61, F5: 62, F6: 63, F7: 64, F8: 65, F9: 66, F10: 67, F11: 68, F12: 69,
+  ShiftLeft: 225, ShiftRight: 229, ControlLeft: 224, ControlRight: 228, AltLeft: 226, AltRight: 230,
+};
+function macroKeyHandler(e) {
+  if (!macroRecording) return;
+  e.preventDefault();
+  const code = CODE_TO_HID[e.code];
+  if (code === undefined) return;
+  const now = performance.now();
+  const delay = macroLastTime ? Math.round(now - macroLastTime) : 0;
+  macroLastTime = now;
+  macroSteps.push({ down: e.type === 'keydown', delay: Math.min(delay, MACRO_DELAY_MAX), code });
+  renderMacroSteps();
+}
+document.getElementById('macroRecord').onclick = () => {
+  macroRecording = !macroRecording;
+  document.getElementById('macroRecord').textContent = macroRecording ? 'Stop recording' : 'Record';
+  macroLastTime = 0;
+  if (macroRecording) { macroSteps = []; renderMacroSteps(); }
+};
+addEventListener('keydown', macroKeyHandler);
+addEventListener('keyup', macroKeyHandler);
+
+document.getElementById('macroPlay').onclick = async () => {
+  for (const step of macroSteps) {
+    await new Promise(r => setTimeout(r, step.delay));
+    log(`Preview: ${step.down ? 'down' : 'up'} ${hidName(step.code) || step.code}`);
+  }
+};
+document.getElementById('macroSave').onclick = async () => {
+  if (!device || macroSelected == null) return;
+  if (!(await setMacroActions(macroSelected, macroSteps))) { log('Macro: save failed (data write).'); return; }
+  const repeat = Math.max(1, Math.min(255, parseInt(document.getElementById('macroRepeat').value) || 1));
+  // mode is left at whatever this slot already had - its value space isn't confirmed
+  // anywhere, so only actNum/repNum/valid change here.
+  const prev = await getMacroMode(macroSelected) || { mode: 0 };
+  const meta = await setMacroMode(macroSelected, { valid: true, actNum: macroSteps.length, repNum: repeat, mode: prev.mode });
+  log(meta ? `Macro ${macroSelected}: saved ${macroSteps.length} step(s).` : 'Macro: save failed (mode write).');
+  await loadMacroList();
+};
+document.getElementById('macroDelete').onclick = async () => {
+  if (!device || macroSelected == null) return;
+  const prev = await getMacroMode(macroSelected) || { mode: 0 };
+  await setMacroMode(macroSelected, { valid: false, actNum: 0, repNum: 0, mode: prev.mode });
+  macroSteps = [];
+  renderMacroSteps();
+  await loadMacroList();
+};
 
 async function getAxisRow(mode, row, timeout = 400, quiet = false) {
   const res = await sendAndWait([CATEGORY.Performance, PERF_SUB.AxisData, mode, row], timeout, quiet);
@@ -4307,6 +4498,15 @@ if (location.search.includes('selftest')) {
   console.assert(Math.abs(dksPosToMm(50, 100, 4) - 2) < 1e-9, 'dksPosToMm: midpoint -> half travel');
   console.assert(dksPosToMm(-10, 100, 4) === 0, 'dksPosToMm: clamps below 0');
   console.assert(dksPosToMm(999, 100, 4) === 4, 'dksPosToMm: clamps above travel');
+
+  console.assert(eq(macroDataPacket(MACRO_SUB.GetData, 2, 1), [7, 3, 2, 1]), 'macro data read packet');
+  {
+    const acts = [{ down: true, delay: 0, code: 4 }, { down: false, delay: 50, code: 4 }];
+    console.assert(eq(macroDataPacket(MACRO_SUB.SetData, 2, 0, acts), [7, 4, 2, 0, ...packAction(acts[0]), ...packAction(acts[1])]), 'macro data write frames actions after a 4-byte header');
+  }
+  console.assert(eq(macroModePacket(MACRO_SUB.GetMode, 5), [7, 1, 5]), 'macro mode read packet');
+  console.assert(eq(macroModePacket(MACRO_SUB.SetMode, 5, { valid: true, actNum: 3, repNum: 1, mode: 0 }), [7, 2, 5, 1, 3, 0, 1, 0, 0]), 'macro mode write packet');
+  console.assert(eq(parseMacroMode([7, 1, 5, 1, 3, 0, 1, 0, 0]), { macroId: 5, valid: true, actNum: 3, repNum: 1, mode: 0 }), 'macro mode reply parses back');
 
   console.log('selftest done');
 }
