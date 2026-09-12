@@ -15,14 +15,12 @@ no framework — vanilla JS and the WebHID API.
   Presets for WASD / Select all / Invert / Clear.
 - **Rapid Trigger** — a toggle per key selection. Off, you set one actuation point;
   on, you also get press and release sensitivity. Keys in RT mode show an `RT` tag
-  on the keycap.
-- **Super Performance mode** — a Rapid Trigger toggle that unlocks 0.001mm precision on
-  the selected key(s) and sets polling rate to 8000Hz; turning it off restores both to
-  what they were before.
+  on the keycap. Values go down to the keyboard's own floor (0.001mm on this board);
+  anything under 0.1mm turns red, in the field and on the key's tag, because a switch
+  can fire unpredictably that shallow.
 - **Dead zones** — top and bottom travel the keyboard ignores.
-- **Advanced keys** — SOCD, Rapid Switch, DKS (multi-stage trigger points on a shared
-  draggable timeline, not per-stage sliders), MPT, Mod-Tap, Toggle, and End binds, one
-  per physical key.
+- **Advanced keys** — SOCD, Rapid Switch, MPT, Mod-Tap, Toggle, and End binds, one per
+  physical key. DKS is switched off while its editor is being redesigned.
 - **Anti-ghosting** — reads and toggles the firmware's shake-optimization switch (it
   resets to ON on every power cycle, by firmware design, not a bug here).
 - **Key test area** — every physical key lights up live while held, for checking
@@ -42,7 +40,11 @@ no framework — vanilla JS and the WebHID API.
 - **Calibration** — has the firmware relearn each switch's top and bottom, showing which
   keys you have already pressed.
 - **Polling rate** — 125 Hz to 8000 Hz.
-- **Per-key RGB** — lights each key by its mode (white = normal, red = Rapid Trigger).
+- **Lighting** — effect, brightness, speed, direction and colour for each light area,
+  custom per-key colours, and on this dual-LED board the upper LED (lights the keycap)
+  and lower LED (lights around the switch) separately. The virtual keyboard mirrors
+  what the board is lighting, live.
+- **Dark theme** — a switch in the title bar; it follows the OS setting until you pick.
 - **Travel gauge** — a live meter drawn from the key's real measured travel, read from
   the device, not assumed.
 - **Raw HID log** — every packet in and out, so you can see exactly what was sent.

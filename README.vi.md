@@ -16,10 +16,9 @@ không thư viện, chỉ JavaScript thuần và WebHID.
 | Tính năng         | Mô tả                                                                                 |
 | ----------------- | ------------------------------------------------------------------------------------- |
 | **Chọn phím**     | Bấm vào bàn phím ảo để chọn, bấm lại để bỏ. Có sẵn nút WASD / Chọn tất cả / Đảo / Xoá |
-| **Rapid Trigger** | Bật/tắt cho từng phím. Tắt thì chỉnh 1 thông số, bật thì thêm 2 thông số nữa          |
-| **Super Performance mode** | Mở khoá Rapid Trigger xuống 0.001mm cho (các) phím đang chọn và tự đặt polling rate 8000Hz; tắt đi thì trả lại đúng 2 giá trị đó như trước |
+| **Rapid Trigger** | Bật/tắt cho từng phím. Tắt thì chỉnh 1 thông số, bật thì thêm 2 thông số nữa. Chỉnh được xuống mức nhỏ nhất bàn phím cho phép (0.001mm với bàn này); dưới 0.1mm thì số chuyển đỏ, cả ở ô nhập lẫn tag `RT` trên phím, vì nông vậy switch có thể kích hoạt thất thường |
 | **Vùng chết**     | Phần hành trình phím mà bàn phím bỏ qua ở đầu và cuối                                 |
-| **Advanced keys** | SOCD, Rapid Switch, DKS (nhiều điểm kích hoạt trên 1 timeline kéo-thả chung, không phải slider riêng từng điểm), MPT, Mod-Tap, Toggle, End — mỗi phím vật lý 1 tính năng |
+| **Advanced keys** | SOCD, Rapid Switch, MPT, Mod-Tap, Toggle, End — mỗi phím vật lý 1 tính năng. DKS tạm tắt trong lúc làm lại phần chỉnh |
 | **Anti-ghosting** | Đọc/bật-tắt công tắc chống dội phím của firmware (tự bật lại sau mỗi lần cắm điện, đúng thiết kế của firmware, không phải lỗi) |
 | **Key test area** | Mỗi phím vật lý sáng lên ngay khi giữ, để kiểm tra rollover và phím chết             |
 | **Macro editor**  | Ghi âm, lưu, xem danh sách, xoá, và xem trước macro ngay trên trình duyệt. Gán macro vào 1 phím thật thì chưa nối được — mã "chạy macro N" mà firmware cần chưa xác nhận được |
@@ -28,7 +27,8 @@ không thư viện, chỉ JavaScript thuần và WebHID.
 | **Travel test**   | **Kiểm chứng** phím có thật sự kích hoạt đúng độ sâu bạn đặt hay không                |
 | **Calibration**   | Bắt bàn phím học lại điểm trên/dưới của từng switch                                   |
 | **Polling rate**  | 125 Hz đến 8000 Hz                                                                    |
-| **Đèn RGB**       | Tô màu từng phím theo chế độ (trắng = thường, đỏ = Rapid Trigger)                     |
+| **Đèn**           | Hiệu ứng, độ sáng, tốc độ, hướng và màu cho từng vùng đèn, tô màu riêng từng phím; với bàn dual LED này thì bật riêng được LED trên (sáng mặt keycap) và LED dưới (sáng quanh switch). Bàn phím ảo hiện trực tiếp đèn đang sáng |
+| **Dark theme**    | Công tắc trên thanh tiêu đề; mặc định theo chế độ sáng/tối của hệ điều hành cho tới khi bạn tự chọn |
 | **Nhật ký HID**   | Xem từng gói tin gửi/nhận, để biết chính xác cái gì đã được gửi đi                    |
 
 **Chỉnh xong là lưu ngay**, không có nút Save.
