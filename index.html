@@ -2668,6 +2668,10 @@ async function applyNow() {
       // Read this key's current axis calibration first so Set doesn't zero it out.
       const cur = await getPerformanceRaw(row, col);
       if (!cur) { failed.push(`${rc}: no response`); continue; }
+      // Already holds exactly this (a box committed with no edit, or a key already at the
+      // value with all 64 picked): nothing to write - the read above is fresh, so skipping on
+      // it is safe, and it spares the keyboard's storage a rewrite of identical data.
+      if (PERF_SETTINGS.every(k => Math.abs(cur[k] - cfg[k]) < 0.0005)) { setKeyMode(rc, cur.mode, cur); ok++; continue; }
       const res = await sendAndWait(perfSetPacket(row, col, cfg, cur), 500);
       if (!res) { failed.push(`${rc}: timed out`); continue; }
       // The echo only proves the packet arrived. The firmware silently ignores values it
