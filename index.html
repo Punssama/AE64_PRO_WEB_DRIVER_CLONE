@@ -169,18 +169,26 @@
   #kb.lit .kb-key .cap { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85); }
   #kb.lit .kb-key.brightled .cap { color: #14201b; text-shadow: 0 1px 2px rgba(255,255,255,.7); }
   /* Dual-LED boards: each socket has an upper and a lower LED, and the Keyboard area's
-     open byte says which are lit (paintLedLayer). Both are drawn as strips on the cap's
-     top and bottom edge - hot when lit, a faint line when off, so the socket always reads
-     as two LEDs. With only one lit, the face falls off in hard bands away from it, since
-     that is the edge the light comes from. Custom properties so each of the four states
-     only swaps the layers that change, not the whole background stack. */
+     open byte says which are lit (paintLedLayer). Both are drawn as a row of pixels on the
+     cap's top and bottom edge - hot pixels with ink gaps when lit, faint when off, so the
+     socket always reads as two LEDs. The ink gaps are what carry a lit strip on a white
+     key (a solid white strip vanished there, on the real board's static white effect);
+     the hot pixels carry it on a dark one. With only one lit, the face falls off in hard
+     bands away from it, since that is the edge the light comes from. Custom properties so
+     each of the four states only swaps the layers that change. */
   #kb.lit.dual {
-    --strip-up: linear-gradient(rgba(255,255,255,.16), rgba(255,255,255,.16)) top / 100% 3px no-repeat;
-    --strip-down: linear-gradient(rgba(255,255,255,.16), rgba(255,255,255,.16)) bottom / 100% 3px no-repeat;
+    --strip-up: repeating-linear-gradient(90deg, rgba(255,255,255,.2) 0 5px, transparent 5px 7px) left top / 100% 3px no-repeat;
+    --strip-down: repeating-linear-gradient(90deg, rgba(255,255,255,.2) 0 5px, transparent 5px 7px) left bottom / 100% 3px no-repeat;
     --falloff: none;
   }
-  #kb.lit.dual.led-up { --strip-up: linear-gradient(to bottom, #FFFCEF 0 3px, rgba(0,0,0,.45) 3px 4px) top / 100% 4px no-repeat; }
-  #kb.lit.dual.led-down { --strip-down: linear-gradient(to top, #FFFCEF 0 3px, rgba(0,0,0,.45) 3px 4px) bottom / 100% 4px no-repeat; }
+  #kb.lit.dual.led-up {
+    --strip-up: repeating-linear-gradient(90deg, #FFFCEF 0 5px, var(--ink) 5px 7px) left top / 100% 4px no-repeat,
+                linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.45)) left 0 top 4px / 100% 1px no-repeat;
+  }
+  #kb.lit.dual.led-down {
+    --strip-down: repeating-linear-gradient(90deg, #FFFCEF 0 5px, var(--ink) 5px 7px) left bottom / 100% 4px no-repeat,
+                  linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.45)) left 0 bottom 4px / 100% 1px no-repeat;
+  }
   #kb.lit.dual.led-up:not(.led-down) { --falloff: linear-gradient(to bottom, transparent 0 30%, rgba(12,31,25,.5) 30% 70%, rgba(12,31,25,.88) 70%); }
   #kb.lit.dual.led-down:not(.led-up) { --falloff: linear-gradient(to top, transparent 0 30%, rgba(12,31,25,.5) 30% 70%, rgba(12,31,25,.88) 70%); }
   /* Both off goes dark whatever the frame says - the layer byte decides what is lit, and
