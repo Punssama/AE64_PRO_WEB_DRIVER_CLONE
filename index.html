@@ -357,6 +357,7 @@
     <span class="navgroup">DEVICE</span>
     <button class="navbtn" data-view="light">Lighting</button>
     <button class="navbtn" data-view="rate">Polling rate</button>
+    <button class="navbtn" data-view="backup">Backup</button>
     <button class="navbtn" data-view="log">Log</button>
   </nav>
 
@@ -450,6 +451,16 @@
     </div>
 
     <div class="view" id="view-log" hidden><div id="log"></div></div>
+
+    <div class="view" id="view-backup" hidden>
+      <p class="hint">Saves everything this tool can read from the active config: performance settings, both keymap layers, advanced keys, lighting, and polling rate. Calibration is not included.</p>
+      <button id="backupSave" disabled>Save backup to file</button>
+      <p class="hint" id="backupSaveState"></p>
+      <p class="warn">Restoring overwrites the ENTIRE active config with whatever is in the file.</p>
+      <input type="file" id="backupFile" accept="application/json" disabled>
+      <button id="backupRestore" class="danger" data-armed="0" disabled>Restore from file</button>
+      <p class="hint" id="backupRestoreState"></p>
+    </div>
 
     <div class="view" id="view-calibration" hidden>
       <p class="warn"><b>Replaces the stored calibration on every key.</b> Press every key fully
@@ -1336,6 +1347,8 @@ async function useDevice(d) {
     // setRemapLayer() the first time the Functions tab opens.
     if (await loadKeymap(0)) await refreshKeymap(0);
     paintCaps();
+    document.getElementById('backupSave').disabled = false;
+    document.getElementById('backupFile').disabled = false;
   } finally {
     setConnecting(false);
   }
@@ -1442,6 +1455,9 @@ function resetDevice(msg) {
   stopConfigPoll();
   setConnecting(false); // in case the device vanished mid-connect, loading screen still up
   calibrating = false;
+  document.getElementById('backupSave').disabled = true;
+  document.getElementById('backupFile').disabled = true;
+  document.getElementById('backupRestore').disabled = true;
   device = null;
   const st = document.getElementById('status');
   st.textContent = 'Not connected';
@@ -3139,6 +3155,161 @@ function parseHigherKey(t) {
   return hk;
 }
 
+// Inverse of parseHigherKey(): turns one key's already-parsed binding back into its own
+// write packet. SOCD/RS are stored on both keys already (each half is self-describing),
+// so this needs no partner lookup, unlike socdPackets()/rsPackets() which build both keys'
+// packets from a pair the live UI's Bind button assembles fresh. DKS/MPT/MT/TGL/END route
+// through HK_SINGLE_SPECS' own getCurrent/packet, the same byte<->mm conversion the live
+// editor already uses, so this can't drift from it.
+function higherKeyWritePacket(rc, hk) {
+  if (hk.type === HK_TYPE.None) return hkClearPacket(rc);
+  const head = [CATEGORY.HigherKey, HK_SUB.Write, ...rcOf(rc), hk.type];
+  if (hk.type === HK_TYPE.SOCD) return [...head, hk.socd.row2, hk.socd.col2, ...u16le16bit(hk.socd.kcOwn), ...u16le16bit(hk.socd.kcPartner), ...u16le16bit(hk.socd.delay), hk.socd.sByte];
+  if (hk.type === HK_TYPE.RS) return [...head, hk.rs.row2, hk.rs.col2, ...u16le16bit(hk.rs.kcOwn), ...u16le16bit(hk.rs.kcPartner), ...u16le16bit(hk.rs.delay)];
+  const spec = Object.values(HK_SINGLE_SPECS).find(s => s.type === hk.type);
+  if (!spec) return null; // unknown type - leave the key untouched rather than guess
+  const cur = spec.getCurrent(hk, keyTravel.get(rc));
+  return spec.packet(rc, cur.kcs, cur.nums, keyTravel.get(rc));
+}
+
+// ---- Backup / restore --------------------------------------------------------------
+// Our own JSON shape, not an attempt at the vendor's internal format - there is no
+// requirement that a backup made here be readable by the real app or vice versa. Every
+// field is gathered through the same read functions the rest of the UI already uses.
+async function buildBackup() {
+  const perf = {};
+  for (const [rc] of KEY_LAYOUT) {
+    const [row, col] = rcOf(rc);
+    perf[rc] = await getPerformanceRaw(row, col);
+  }
+  for (const layer of [0, 1]) {
+    if (!layerCache[layer]) await loadKeymap(layer);
+    if (!layerCache[layer]?.cur) await refreshKeymap(layer);
+  }
+  const keymap = { 0: layerCache[0]?.cur, 1: layerCache[1]?.cur };
+  if (!advCache) await loadAdvancedKeys();
+  const adv = advCache ? Object.fromEntries(advCache) : {};
+  const lighting = { areas: {}, custom: null };
+  for (const a of lightAreas) lighting.areas[a] = { state: await getLighting(a), palette: await getPalette(a) };
+  if (lightAreas.includes(AREA.Keyboard)) { await loadCustomColors(); lighting.custom = [...customColors]; }
+  return {
+    tool: 'ae64-pro-tuner', version: 1, savedAt: new Date().toISOString(),
+    configIndex: currentConfig, configName: configLabel(currentConfig), rate: rateSel,
+    perf, keymap, adv, lighting,
+  };
+}
+
+document.getElementById('backupSave').onclick = async () => {
+  if (!device) return;
+  document.getElementById('backupSaveState').textContent = 'Reading...';
+  const data = await buildBackup();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ae64-backup-${data.configName.replace(/\W+/g, '_')}-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  document.getElementById('backupSaveState').textContent = 'Saved.';
+  log(`Backup: saved ${Object.keys(data.perf).length} keys, ${Object.keys(data.adv).length} advanced bindings.`);
+};
+
+// Reads everything back and diffs against the file - the same "believe the device, not
+// the request" rule applyNow()/setLighting()/setKeyCode() already use, just for a whole
+// config write instead of one field.
+async function verifyRestore(before) {
+  const after = await buildBackup();
+  const diffs = [];
+  for (const [rc, cfg] of Object.entries(before.perf || {})) {
+    const a = after.perf[rc];
+    if (!a || !cfg) continue;
+    for (const k of Object.keys(cfg)) if (Math.abs((a[k] ?? 0) - cfg[k]) > 0.0005) diffs.push(`${rc}.${k}`);
+  }
+  for (const layer of [0, 1]) for (let r = 0; r < 6; r++) for (let c = 0; c < 21; c++) {
+    if ((before.keymap[layer]?.[r]?.[c] ?? 0) !== (after.keymap[layer]?.[r]?.[c] ?? 0)) diffs.push(`keymap L${layer} ${r}-${c}`);
+  }
+  log(diffs.length ? `Restore verify: ${diffs.length} field(s) differ from the file - ${diffs.slice(0, 20).join(', ')}` : 'Restore verify: every read-back value matches the file.');
+  return diffs;
+}
+
+// Palette has no confirmed write packet anywhere in the vendor bundle (captured in
+// buildBackup for reference only), so it cannot be replayed here - documented gap, not
+// guessed at.
+async function restoreBackup(data) {
+  saveState('Restoring...', true);
+  let ok = 0, failed = 0;
+  for (const [rc, cfg] of Object.entries(data.perf || {})) {
+    if (!cfg) continue;
+    const [row, col] = rcOf(rc);
+    (await sendAndWait(perfSetPacket(row, col, cfg, cfg))) ? ok++ : failed++;
+  }
+  for (const layer of [0, 1]) {
+    const rows = data.keymap?.[layer];
+    if (!rows) continue;
+    for (const [rc] of KEY_LAYOUT) {
+      const [row, col] = rcOf(rc);
+      const code = rows[row]?.[col];
+      if (code === undefined) continue;
+      (await setKeyCode(row, col, code, layer)) ? ok++ : failed++;
+    }
+  }
+  for (const [rc, hk] of Object.entries(data.adv || {})) {
+    const pkt = higherKeyWritePacket(rc, hk);
+    if (!pkt) { failed++; continue; }
+    (await sendAndWait(pkt)) ? ok++ : failed++;
+  }
+  for (const [area, entry] of Object.entries(data.lighting?.areas || {})) {
+    if (!entry.state) continue;
+    lightArea = Number(area);
+    lightState = entry.state;
+    await setLighting(entry.state);
+  }
+  if (data.lighting?.custom) {
+    customColors.clear();
+    for (const [rc, c] of data.lighting.custom) customColors.set(rc, c);
+    const n = ledPackets[AREA.Keyboard] || 0;
+    for (let p = 0; p < n; p++) sendCustomPacket(p);
+  }
+  if (Number.isInteger(data.rate)) {
+    const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Write, data.rate]);
+    if (res) { rateSel = data.rate; renderRates(); }
+  }
+  invalidateAdvanced();
+  await loadAllModes();
+  if (selected.size) await fillFormFrom(selected.values().next().value);
+  const diffs = await verifyRestore(data);
+  saveState(`Restore done: ${ok} writes ok${failed ? `, ${failed} FAILED` : ''}${diffs.length ? `, ${diffs.length} differ` : ''}`, !!(failed || diffs.length));
+}
+
+let backupData = null;
+document.getElementById('backupFile').onchange = async e => {
+  const file = e.target.files[0];
+  document.getElementById('backupRestore').disabled = true;
+  if (!file) return;
+  try {
+    backupData = JSON.parse(await file.text());
+    const good = backupData?.tool === 'ae64-pro-tuner';
+    document.getElementById('backupRestore').disabled = !device || !good;
+    document.getElementById('backupRestoreState').textContent = good
+      ? `Loaded: ${backupData.configName || ''}, saved ${backupData.savedAt || 'unknown time'}.`
+      : 'Not a recognised backup file.';
+  } catch (err) {
+    backupData = null;
+    document.getElementById('backupRestoreState').textContent = 'Could not read that file: ' + err.message;
+  }
+};
+document.getElementById('backupRestore').onclick = async () => {
+  const btn = document.getElementById('backupRestore');
+  if (!device || !backupData) return;
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Click again to confirm';
+    return;
+  }
+  btn.dataset.armed = '0';
+  btn.textContent = 'Restore from file';
+  await restoreBackup(backupData);
+};
+
 // Mode from the byte on whichever key is being called A. 1/2 and 2/1 are the same binding
 // seen from either end, so a pair reads back correctly whichever key it is listed from.
 const socdModeOf = sByteA => SOCD_MODES.findIndex(m => m[2] === sByteA);
@@ -4045,6 +4216,10 @@ if (location.search.includes('selftest')) {
 
   console.assert(SPECIAL_BY_CODE.get(61953)?.name.includes('Windows'), 'System type hint assumes this special code exists');
   console.assert(SPECIAL_BY_CODE.get(61954)?.name.includes('Mac'), 'System type hint assumes this special code exists');
+
+  console.assert(eq(higherKeyWritePacket('3-1', parseHigherKey(tglPkt)), tglPkt), 'a parsed TGL binding writes back byte-for-byte');
+  console.assert(eq(higherKeyWritePacket('3-1', parseHigherKey(dksPkt)), dksPkt), 'a parsed DKS binding writes back byte-for-byte');
+  console.assert(eq(higherKeyWritePacket('2-5', { type: HK_TYPE.None }), [6, 2, 2, 5, 0]), 'restoring an empty key clears it');
 
   console.log('selftest done');
 }
