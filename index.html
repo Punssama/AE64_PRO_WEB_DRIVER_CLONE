@@ -224,7 +224,7 @@
      Bottom/Release (3.0mm), but they land on opposite halves of the mirror instead of the
      same pixel, so nothing ever needs to stack or fight over z-index the way a single
      non-mirrored track would. */
-  .dks-header { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 4px 22px 28px; }
+  .dks-header { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 4px 22px 46px; }
   .dks-rows { display: flex; flex-direction: column; gap: 24px; }
   .dks-row { display: flex; align-items: center; gap: 10px; }
   .dks-track { position: relative; flex: 1; height: 8px; margin: 0 20px; background: #FFF6E6; border: 2px solid var(--ink); user-select: none; }
@@ -237,6 +237,9 @@
   .dks-point { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; touch-action: none; user-select: none; z-index: 1; }
   .dks-point::before { content: ''; width: 11px; height: 11px; background: var(--accent); border: 2px solid var(--ink); pointer-events: none; }
   .dks-val { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--ink); white-space: nowrap; background: var(--surface); padding: 0 2px; pointer-events: none; }
+  /* Odd-indexed stages (Bottom, Lift) sit higher so their label never lands at the same
+     height as the even-indexed neighbor (Press, Release) they're often close beside. */
+  .dks-point-high .dks-val { bottom: 30px; }
   /* Fixed, non-interactive stops - the vendor's own DKS screen picks from a set of
      positions rather than a free continuous drag ("select style", not a slider), so these
      are always visible as a reference for where a drag will land. */
@@ -4143,7 +4146,10 @@ function renderDksTimeline(el, spec, kcs, nums, disabled, travelRaw) {
     for (const point of pointsByStage[idx]) {
       point.style.left = pct + '%';
       const val = point.querySelector('.dks-val');
-      if (val) val.textContent = nums[idx].toFixed(2);
+      // Named, not just numbered: these 4 points are 4 independent actions (their own
+      // output key each - see the kcslot button), not steps of one slider, so which one
+      // is which has to be visible at a glance, not only in a hover title.
+      if (val) val.textContent = `${spec.rows[idx].slot} ${nums[idx].toFixed(2)}`;
     }
   }
 
@@ -4172,7 +4178,10 @@ function renderDksTimeline(el, spec, kcs, nums, disabled, travelRaw) {
     spec.rows.forEach((stageRow, idx) => {
       const half = DKS_HALVES[idx];
       const point = document.createElement('div');
-      point.className = 'dks-point';
+      // Adjacent stages alternate label height (odd index sits higher) so two labels
+      // never share a row - Bottom and Release in particular are both "near max depth"
+      // by default (3.0mm each) and sit close together near the shared midpoint.
+      point.className = 'dks-point' + (idx % 2 ? ' dks-point-high' : '');
       point.title = stageRow.slot;
       point.appendChild(Object.assign(document.createElement('span'), { className: 'dks-val' }));
       if (!disabled) {
