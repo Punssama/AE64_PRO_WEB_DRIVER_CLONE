@@ -218,11 +218,18 @@
 
   /* DKS timeline: one shared horizontal track, multiple points draggable on the same
      0..travel axis - matching the vendor's own DKS screen, unlike the per-stage sliders
-     MPT/MT/TGL/END still use. */
-  .dks-track { position: relative; height: 8px; margin: 30px 30px 40px; background: #FFF6E6; border: 2px solid var(--ink); }
-  .dks-marker { position: absolute; top: -26px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; cursor: ew-resize; touch-action: none; }
-  .dks-marker::after { content: ''; position: absolute; top: 26px; left: 50%; width: 3px; height: 34px; background: var(--accent); transform: translateX(-50%); pointer-events: none; }
+     MPT/MT/TGL/END still use. Markers are bottom-anchored to the track and built as a
+     real flex column ending in a .dks-line spacer, rather than top:-26px plus a
+     separately-offset ::after line - that combination overshot 26px past the track's own
+     bottom edge, and gave no way to grow the gap when two markers land on the same spot
+     (their tag+box collide and render as garbled overlapping text - happens by default,
+     since DKS's own defaults set Press=Lift=0.3mm and Bottom=Release=3.0mm). Growing the
+     .dks-line's height instead pushes a colliding marker's content up as one rigid block,
+     with no separate math to keep in sync. */
+  .dks-track { position: relative; height: 8px; margin: 70px 30px 20px; background: #FFF6E6; border: 2px solid var(--ink); }
+  .dks-marker { position: absolute; bottom: 6px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; cursor: ew-resize; touch-action: none; }
   .dks-tag { font-size: 13px; color: var(--muted); white-space: nowrap; margin-bottom: 2px; }
+  .dks-line { width: 3px; background: var(--accent); }
   .dks-marker input[type=number] { width: 58px; text-align: center; padding: 3px 4px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 14px; box-sizing: border-box; }
 
   .field { margin-bottom: 11px; }
@@ -327,6 +334,12 @@
   /* The two groups are only there to be shown and hidden - their fields must still be
      items of the grid above, not of a box inside it. */
   #normalFields, #rtFields { display: contents; }
+  /* Unlike normalFields/rtFields, this one is a REAL grid item (not display:contents) -
+     display:contents would hoist the button+hint into the same 4-column row as
+     rtToggle's 3 fields, silently scattering them across a second row. Spanning every
+     column instead gives it a row of its own without disturbing that layout. */
+  #superPerfRow { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  #superPerfRow .hint { margin: 0; flex: 1 1 260px; }
 
   #log { background: var(--ink); color: var(--desk); font-family: var(--term); font-size: 16px; line-height: 1.25; padding: 11px; height: 100%; overflow-y: auto; white-space: pre-wrap; }
 
@@ -413,11 +426,13 @@
             <div class="ctl"><input type="range" id="normalPress_r" min="0" max="3.4" step="0.05"><input id="normalPress" type="number" step="0.05" value="1.0"></div>
           </div>
         </div>
-        <div id="rtFields" hidden>
+        <div id="superPerfRow" hidden>
           <button id="superPerfToggle" class="toggle" data-needs-key aria-pressed="false">
             <span>Super Performance mode</span><span class="tog">OFF</span>
           </button>
           <p class="hint">Unlocks Rapid Trigger down to 0.001mm and sets polling rate to 8000Hz for the selected key(s). Turning it off restores what was there before.</p>
+        </div>
+        <div id="rtFields" hidden>
           <div class="field">
             <label for="rtFirstTouch">First trigger (mm)</label>
             <div class="ctl"><input type="range" id="rtFirstTouch_r" min="0" max="3.4" step="0.05"><input id="rtFirstTouch" type="number" step="0.05" value="0.3"></div>
@@ -996,6 +1011,7 @@ function setRtMode(v) {
   btn.querySelector('.tog').textContent = rtMode ? 'ON' : 'OFF';
   document.getElementById('normalFields').hidden = !!rtMode;
   document.getElementById('rtFields').hidden = !rtMode;
+  document.getElementById('superPerfRow').hidden = !rtMode;
   drawGauge();
 }
 document.getElementById('rtToggle').onclick = () => {
@@ -1012,6 +1028,13 @@ document.getElementById('rtToggle').onclick = () => {
 // really is auto-set (per the original ask), not just unlocked, and both revert on OFF.
 const RT_STEP_NORMAL = { rtFirstTouch: 0.05, rtPress: 0.02, rtRelease: 0.02 };
 const RT_STEP_SUPER = 0.001;
+// Step alone doesn't make 0.001mm reachable BY DRAG: a slider still spanning its old
+// 1mm/3.4mm range would pack ~1000/3400 positions into the same physical pixel width,
+// so almost any drag near the low end still lands on the literal minimum. Shrinking the
+// span too is what makes each step individually hittable - kept small enough that
+// max/step stays near the slider's own pixel width (~150px here), or positions would be
+// sub-pixel apart again and we'd be back to the same bug.
+const RT_STEP_SUPER_MAX = 0.1;
 let superPerfOn = false;
 let superPerfSnapshot = null; // { perf: Map<rc, getPerformanceRaw() result>, rateSel: number } | null
 
@@ -1021,6 +1044,7 @@ function setRtStep(on) {
     document.getElementById(id).step = step;
     document.getElementById(id + '_r').step = step;
   }
+  syncSliders(); // recomputes each RT slider's max for the (now different) span below
 }
 
 document.getElementById('superPerfToggle').onclick = async () => {
@@ -1031,6 +1055,7 @@ document.getElementById('superPerfToggle').onclick = async () => {
   btn.querySelector('.tog').textContent = superPerfOn ? 'ON' : 'OFF';
 
   if (superPerfOn) {
+    setRtStep(true); // unlock the slider immediately - don't make the click wait on reads first
     const perf = new Map();
     for (const rc of selected) {
       const [row, col] = rc.split('-').map(Number);
@@ -1038,7 +1063,6 @@ document.getElementById('superPerfToggle').onclick = async () => {
       if (cur) perf.set(rc, cur);
     }
     superPerfSnapshot = { perf, rateSel };
-    setRtStep(true);
     rateSel = 0; // '8000 Hz' is RATES[0]
     renderRates();
     await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Write, rateSel]);
@@ -1158,7 +1182,8 @@ function syncSliders() {
   for (const id of SLIDER_FIELDS) {
     const box = document.getElementById(id), slider = document.getElementById(id + '_r');
     const v = parseFloat(box.value);
-    const span = DEPTH_FIELDS.includes(id) ? travelMm : 1;
+    const span = superPerfOn && RT_STEP_NORMAL[id] !== undefined ? RT_STEP_SUPER_MAX
+               : DEPTH_FIELDS.includes(id) ? travelMm : 1;
     // Never let the slider's range clamp a value the keyboard actually holds.
     slider.max = Number.isFinite(v) ? Math.max(span, v) : span;
     slider.value = box.value;
@@ -4064,6 +4089,33 @@ function dksPosToMm(offsetX, trackWidth, travel) {
   return Math.max(0, Math.min(travel, frac * travel));
 }
 
+// Markers within this % of the track stack vertically (taller connector line) instead of
+// landing on the same spot - which two of DKS's four points do by default (Press=Lift, at
+// 0.3mm; Bottom=Release, at 3.0mm), so this isn't an edge case, it's the very first thing
+// a fresh key shows. DKS_LINE_STEP must clear a marker's own content height (tag + gap +
+// number box, ~44px with this CSS) or two stacked levels still overlap each other.
+const DKS_STACK_GAP_PCT = 6;
+const DKS_MARKER_H = 46;
+const DKS_LINE_BASE = 14, DKS_LINE_STEP = 50;
+
+// Repositions every marker at once (not just the one that moved) since a single drag can
+// newly collide with, or separate from, any other marker on the same track. Also grows
+// the track's own top margin to fit however many levels are actually stacked right now -
+// fixed headroom would either overlap a rare 4-way collision or waste space the rest of
+// the time.
+function layoutDksMarkers(entries, travel, track) {
+  const order = entries.map((e, i) => ({ i, pct: Math.max(0, Math.min(100, e.mm / travel * 100)) })).sort((a, b) => a.pct - b.pct);
+  let level = 0, prevPct = null, maxLevel = 0;
+  for (const { i, pct } of order) {
+    level = (prevPct !== null && Math.abs(pct - prevPct) < DKS_STACK_GAP_PCT) ? level + 1 : 0;
+    maxLevel = Math.max(maxLevel, level);
+    entries[i].el.style.left = pct + '%';
+    entries[i].lineEl.style.height = (DKS_LINE_BASE + level * DKS_LINE_STEP) + 'px';
+    prevPct = pct;
+  }
+  track.style.marginTop = (DKS_MARKER_H + DKS_LINE_BASE + maxLevel * DKS_LINE_STEP + 10) + 'px';
+}
+
 // DKS only: one shared horizontal track, 4 draggable points (Press/Bottom/Release/Lift)
 // on the same 0..travel(mm) axis for this key. No ordering is enforced between points -
 // the per-stage sliders this replaces did not enforce one either, so this keeps the same
@@ -4092,6 +4144,7 @@ function renderDksTimeline(el, spec, kcs, nums, disabled, travelRaw) {
 
   const track = document.createElement('div');
   track.className = 'dks-track';
+  const entries = [];
   spec.rows.forEach((row, i) => {
     const m = document.createElement('div');
     m.className = 'dks-marker';
@@ -4101,16 +4154,19 @@ function renderDksTimeline(el, spec, kcs, nums, disabled, travelRaw) {
     const box = document.createElement('input');
     box.type = 'number'; box.min = 0; box.max = travel; box.step = row.num.step;
     box.value = nums[i]; box.disabled = disabled;
-    m.append(tag, box);
+    const lineEl = document.createElement('div');
+    lineEl.className = 'dks-line';
+    m.append(tag, box, lineEl);
     track.appendChild(m);
+    entries.push({ el: m, lineEl, mm: nums[i] });
 
-    const place = mm => { m.style.left = Math.max(0, Math.min(100, mm / travel * 100)) + '%'; };
     const settle = mm => {
-      nums[i] = +Math.max(0, Math.min(travel, mm)).toFixed(2);
-      box.value = nums[i];
-      place(nums[i]);
+      const v = +Math.max(0, Math.min(travel, mm)).toFixed(2);
+      nums[i] = v;
+      entries[i].mm = v;
+      box.value = v;
+      layoutDksMarkers(entries, travel, track);
     };
-    place(nums[i]);
     box.onchange = () => settle(Number(box.value) || 0);
 
     if (!disabled) {
@@ -4124,6 +4180,7 @@ function renderDksTimeline(el, spec, kcs, nums, disabled, travelRaw) {
       };
     }
   });
+  layoutDksMarkers(entries, travel, track);
   el.appendChild(track);
 }
 
