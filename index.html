@@ -16,6 +16,7 @@
     --accent: #FFC94D;
     --ink: #12352B;
     --muted: #4A6B5C;
+    --danger: #B33A3A;
     --term: 'VT323', 'Courier New', monospace;
   }
   * { box-sizing: border-box; }
@@ -91,7 +92,7 @@
   #saveState:not(:empty)::before { content: '\2713 '; }
   #saveState.busy::before { content: ''; }
 
-  .sidebar { display: flex; flex-direction: column; gap: 7px; min-height: 0; }
+  .sidebar { display: flex; flex-direction: column; gap: 7px; min-height: 0; overflow-y: auto; }
   /* The device's own 4 stored configs. First thing in the sidebar because it is the
      widest scope on screen: every view below it edits whichever config is picked here. */
   #configPicker { display: flex; flex-direction: column; gap: 3px; padding-bottom: 9px; margin-bottom: 2px; border-bottom: 2px solid var(--ink); }
@@ -339,12 +340,15 @@
   /* The two groups are only there to be shown and hidden - their fields must still be
      items of the grid above, not of a box inside it. */
   #normalFields, #rtFields { display: contents; }
-  /* Unlike normalFields/rtFields, this one is a REAL grid item (not display:contents) -
-     display:contents would hoist the button+hint into the same 4-column row as
-     rtToggle's 3 fields, silently scattering them across a second row. Spanning every
-     column instead gives it a row of its own without disturbing that layout. */
-  #superPerfRow { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  #superPerfRow .hint { margin: 0; flex: 1 1 260px; }
+  /* Anything else placed inside a display:contents group (like the hint below) still
+     becomes its own grid item in the 4-column grid above - span every column so it gets
+     a row of its own instead of silently landing in whatever cell is next in the flow. */
+  .rt-full-row { grid-column: 1 / -1; margin: 0; }
+  /* Rapid Trigger can be set down to 0.001mm, but a switch firing that shallow can be
+     unreliable - flagging it in the field itself rather than gating it behind a mode.
+     Matches .field input/.field label's own specificity (class+element) so this actually
+     wins the cascade instead of losing silently to the base ink/muted color. */
+  .field input.rt-unstable, .field label.rt-unstable { color: var(--danger); }
 
   #log { background: var(--ink); color: var(--desk); font-family: var(--term); font-size: 16px; line-height: 1.25; padding: 11px; height: 100%; overflow-y: auto; white-space: pre-wrap; }
 
@@ -431,25 +435,20 @@
             <div class="ctl"><input type="range" id="normalPress_r" min="0" max="3.4" step="0.05"><input id="normalPress" type="number" step="0.05" value="1.0"></div>
           </div>
         </div>
-        <div id="superPerfRow" hidden>
-          <button id="superPerfToggle" class="toggle" data-needs-key aria-pressed="false">
-            <span>Super Performance mode</span><span class="tog">OFF</span>
-          </button>
-          <p class="hint">Unlocks Rapid Trigger down to 0.001mm and sets polling rate to 8000Hz for the selected key(s). Turning it off restores what was there before.</p>
-        </div>
         <div id="rtFields" hidden>
           <div class="field">
             <label for="rtFirstTouch">First trigger (mm)</label>
-            <div class="ctl"><input type="range" id="rtFirstTouch_r" min="0" max="3.4" step="0.05"><input id="rtFirstTouch" type="number" step="0.05" value="0.3"></div>
+            <div class="ctl"><input type="range" id="rtFirstTouch_r" min="0" max="3.4" step="0.001"><input id="rtFirstTouch" type="number" step="0.001" value="0.3"></div>
           </div>
           <div class="field">
             <label for="rtPress">Press sensitivity (mm)</label>
-            <div class="ctl"><input type="range" id="rtPress_r" min="0" max="1" step="0.02"><input id="rtPress" type="number" step="0.02" value="0.2"></div>
+            <div class="ctl"><input type="range" id="rtPress_r" min="0" max="1" step="0.001"><input id="rtPress" type="number" step="0.001" value="0.2"></div>
           </div>
           <div class="field">
             <label for="rtRelease">Release sensitivity (mm)</label>
-            <div class="ctl"><input type="range" id="rtRelease_r" min="0" max="1" step="0.02"><input id="rtRelease" type="number" step="0.02" value="0.2"></div>
+            <div class="ctl"><input type="range" id="rtRelease_r" min="0" max="1" step="0.001"><input id="rtRelease" type="number" step="0.001" value="0.2"></div>
           </div>
+          <p class="hint rt-full-row">Below 0.1mm turns red - the switch may fire unpredictably that shallow.</p>
         </div>
       </div>
 
@@ -1004,6 +1003,7 @@ function fillCfg(cur) {
   if (cur.axisRangeMax > 0) travelMm = cur.axisRangeMax / 1000;
   syncSliders();
   drawGauge();
+  for (const id of RT_WARN_FIELDS) updateRtWarn(id);
 }
 
 // 0 = normal, 1 = rapid trigger. Mirrors the device's mode byte; the toggle is the
@@ -1016,7 +1016,6 @@ function setRtMode(v) {
   btn.querySelector('.tog').textContent = rtMode ? 'ON' : 'OFF';
   document.getElementById('normalFields').hidden = !!rtMode;
   document.getElementById('rtFields').hidden = !rtMode;
-  document.getElementById('superPerfRow').hidden = !rtMode;
   drawGauge();
 }
 document.getElementById('rtToggle').onclick = () => {
@@ -1025,67 +1024,6 @@ document.getElementById('rtToggle').onclick = () => {
   // instantly. `applyNow` repaints them from the read-back, so a refused write corrects itself.
   for (const rc of selected) setKeyMode(rc, rtMode);
   scheduleApply(0);
-};
-
-// Super Performance mode: nothing actually blocks 0.001mm today - typing it into the box
-// already works, and u16le() already stores µm resolution. What this unlocks is the
-// slider's step, so DRAGGING can reach that precision too, not just typing. Polling rate
-// really is auto-set (per the original ask), not just unlocked, and both revert on OFF.
-const RT_STEP_NORMAL = { rtFirstTouch: 0.05, rtPress: 0.02, rtRelease: 0.02 };
-const RT_STEP_SUPER = 0.001;
-// Step alone doesn't make 0.001mm reachable BY DRAG: a slider still spanning its old
-// 1mm/3.4mm range would pack ~1000/3400 positions into the same physical pixel width,
-// so almost any drag near the low end still lands on the literal minimum. Shrinking the
-// span too is what makes each step individually hittable - kept small enough that
-// max/step stays near the slider's own pixel width (~150px here), or positions would be
-// sub-pixel apart again and we'd be back to the same bug.
-const RT_STEP_SUPER_MAX = 0.1;
-let superPerfOn = false;
-let superPerfSnapshot = null; // { perf: Map<rc, getPerformanceRaw() result>, rateSel: number } | null
-
-function setRtStep(on) {
-  for (const id of Object.keys(RT_STEP_NORMAL)) {
-    const step = on ? RT_STEP_SUPER : RT_STEP_NORMAL[id];
-    document.getElementById(id).step = step;
-    document.getElementById(id + '_r').step = step;
-  }
-  syncSliders(); // recomputes each RT slider's max for the (now different) span below
-}
-
-document.getElementById('superPerfToggle').onclick = async () => {
-  const btn = document.getElementById('superPerfToggle');
-  if (!device || !selected.size) return;
-  superPerfOn = !superPerfOn;
-  btn.setAttribute('aria-pressed', String(superPerfOn));
-  btn.querySelector('.tog').textContent = superPerfOn ? 'ON' : 'OFF';
-
-  if (superPerfOn) {
-    setRtStep(true); // unlock the slider immediately - don't make the click wait on reads first
-    const perf = new Map();
-    for (const rc of selected) {
-      const [row, col] = rc.split('-').map(Number);
-      const cur = await getPerformanceRaw(row, col);
-      if (cur) perf.set(rc, cur);
-    }
-    superPerfSnapshot = { perf, rateSel };
-    rateSel = 0; // '8000 Hz' is RATES[0]
-    renderRates();
-    await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Write, rateSel]);
-    log('Super Performance mode ON - RT step unlocked to 0.001mm, polling rate set to 8000 Hz.');
-  } else {
-    setRtStep(false);
-    if (superPerfSnapshot) {
-      rateSel = superPerfSnapshot.rateSel;
-      renderRates();
-      await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ReportRateSetting, QR.Write, rateSel]);
-      for (const [rc, cfg] of superPerfSnapshot.perf) {
-        const [row, col] = rc.split('-').map(Number);
-        await sendAndWait(perfSetPacket(row, col, cfg, cfg), 500);
-      }
-      log('Super Performance mode OFF - restored previous RT values and polling rate.');
-    }
-    superPerfSnapshot = null;
-  }
 };
 
 for (const group of document.querySelectorAll('.tabs')) {
@@ -1187,8 +1125,7 @@ function syncSliders() {
   for (const id of SLIDER_FIELDS) {
     const box = document.getElementById(id), slider = document.getElementById(id + '_r');
     const v = parseFloat(box.value);
-    const span = superPerfOn && RT_STEP_NORMAL[id] !== undefined ? RT_STEP_SUPER_MAX
-               : DEPTH_FIELDS.includes(id) ? travelMm : 1;
+    const span = DEPTH_FIELDS.includes(id) ? travelMm : 1;
     // Never let the slider's range clamp a value the keyboard actually holds.
     slider.max = Number.isFinite(v) ? Math.max(span, v) : span;
     slider.value = box.value;
@@ -1201,6 +1138,23 @@ for (const id of SLIDER_FIELDS) {
   box.addEventListener('input', () => { slider.value = box.value; scheduleApply(); });
   // Enter or blur means the typed value is final - no reason to sit out the debounce.
   box.addEventListener('change', () => scheduleApply(0));
+}
+
+// Rapid Trigger can be set as low as 0.001mm, but a switch firing that shallow can read
+// as unstable - flagged in the field itself rather than gated behind a separate mode.
+const RT_WARN_FIELDS = ['rtFirstTouch', 'rtPress', 'rtRelease'];
+const RT_WARN_BELOW = 0.1;
+function updateRtWarn(id) {
+  const box = document.getElementById(id);
+  const unstable = parseFloat(box.value) < RT_WARN_BELOW;
+  box.classList.toggle('rt-unstable', unstable);
+  box.closest('.field')?.querySelector('label')?.classList.toggle('rt-unstable', unstable);
+}
+for (const id of RT_WARN_FIELDS) {
+  const box = document.getElementById(id), slider = document.getElementById(id + '_r');
+  updateRtWarn(id);
+  box.addEventListener('input', () => updateRtWarn(id));
+  slider.addEventListener('input', () => updateRtWarn(id));
 }
 
 // Sidebar swaps the lower panel instead of stacking every section down the page.
