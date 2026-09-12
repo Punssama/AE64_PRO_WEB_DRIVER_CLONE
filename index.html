@@ -1455,9 +1455,19 @@ document.getElementById('selInvert').onclick = () => setSelection(KEY_LAYOUT.map
 document.getElementById('selNone').onclick = () => setSelection([]);
 
 const logEl = document.getElementById('log');
+const logView = document.getElementById('view-log');
+// One text node per line: `textContent +=` copied the whole log again for every new line,
+// so each line cost more the longer a session ran - and a 64-key auto-save or a backup
+// logs hundreds. Capped, since nobody scrolls back that far, and pinned to the bottom at
+// most once a frame, only while the log is on screen (scrollLogToEnd() re-pins on open).
+const LOG_MAX_LINES = 5000;
+let logPinPending = false;
 function log(msg) {
-  logEl.textContent += msg + '\n';
-  logEl.scrollTop = logEl.scrollHeight;
+  logEl.append(msg + '\n');
+  if (logEl.childNodes.length > LOG_MAX_LINES) logEl.firstChild.remove();
+  if (logPinPending || logView.hidden) return;
+  logPinPending = true;
+  requestAnimationFrame(() => { logPinPending = false; logEl.scrollTop = logEl.scrollHeight; });
 }
 
 // A hidden element has no layout, so every scroll-to-bottom while the Log view sat in
@@ -1529,8 +1539,19 @@ function onInputReport(e) {
     }
     return;
   }
-  const w = waiters.splice(i, 1)[0];
+  const w = waiters[i];
   if (!w.quiet) log('IN  [' + Array.from(data.slice(0, 12)).join(',') + ' ...]');
+  settleWaiter(w, data);
+}
+
+// Takes a request off the queue with its answer: the reply, or null for a timeout or a
+// failed send. Clears its timer too - the polling loops make hundreds of requests a second,
+// and each one used to leave a timer behind that fired later for nothing.
+function settleWaiter(w, data) {
+  const i = waiters.indexOf(w);
+  if (i === -1) return;
+  waiters.splice(i, 1);
+  clearTimeout(w.timer);
   w.resolve(data);
 }
 
@@ -1682,18 +1703,18 @@ async function sendAndWaitRaw(bytes, timeout = 1000, quiet = false) {
   const payload = build64(bytes);
   if (!quiet) log('OUT [' + bytes.join(',') + ']');
   const head = bytes.slice(0, 4);
+  let w;
   const p = new Promise((resolve) => {
-    const w = { head, resolve, quiet };
+    w = { head, resolve, quiet };
+    w.timer = setTimeout(() => settleWaiter(w, null), timeout);
     waiters.push(w);
-    setTimeout(() => {
-      const i = waiters.indexOf(w);
-      if (i !== -1) { waiters.splice(i, 1); resolve(null); }
-    }, timeout);
   });
   try {
     if (!device.opened) await device.open();
     await device.sendReport(0, payload);
   } catch (err) {
+    // Still sits out the timeout rather than failing at once: that wait is the only thing
+    // pacing the polling loops while the keyboard re-enumerates, or they would spin here.
     log('Send error (device likely re-enumerating, try again shortly): ' + err.message);
   }
   return p;
@@ -2316,23 +2337,30 @@ function check(label, measured, set, err) {
        + `<b class="${ok ? 'ok' : 'bad'}">${ok ? 'OK' : 'OFF'}</b></span>`;
 }
 
+// innerHTML re-parses and lays out again even when the markup is identical - at one paint
+// a frame that was most of an idle travel test's cost, since a resting key changes nothing.
+function setHtml(id, html) {
+  const el = document.getElementById(id);
+  if (el.__html !== html) { el.innerHTML = html; el.__html = html; }
+}
+
 function renderTT(route) {
   const rc = tt.rc;
   if (!rc) {
-    document.getElementById('ttNow').innerHTML = '<span class="muted">No key selected.</span>';
-    document.getElementById('ttChecks').innerHTML = '';
+    setHtml('ttNow', '<span class="muted">No key selected.</span>');
+    setHtml('ttChecks', '');
     // Otherwise this would sit on whatever the watched key's last hint was (say, a dead-zone
     // warning) instead of pointing at the thing that actually needs doing next.
-    document.getElementById('ttHint').textContent = 'Select a key to run the travel test.';
+    setHtml('ttHint', 'Select a key to run the travel test.');
     return;
   }
   const rtOn = rtMode === 1;
-  document.getElementById('ttNow').innerHTML =
+  setHtml('ttNow',
       `<span><span class="muted">Key</span> <b>${KEY_LABEL.get(rc) || rc}</b></span>`
     + `<span><span class="muted">Mode</span> <b>${rtOn ? 'Rapid Trigger' : 'Normal'}</b></span>`
     + `<span><span class="muted">Now</span> <b>${MM(route)} mm</b></span>`
     + `<span><b class="${tt.pressed ? 'ok' : 'muted'}">${tt.pressed ? 'PRESSED' : 'released'}</b></span>`
-    + `<span><span class="muted">Presses</span> <b>${tt.count}</b></span>`;
+    + `<span><span class="muted">Presses</span> <b>${tt.count}</b></span>`);
   const num = id => parseFloat(document.getElementById(id).value) || 0;
   const row = (label, iv, set) => check(label, mid(iv), set, halfWidth(iv));
   // The top dead zone is travel the firmware ignores, so a trigger point set shallower
@@ -2341,17 +2369,17 @@ function renderTT(route) {
   const dead = num('pressDeadStroke');
   const eff = set => Math.max(set, dead);
   const trigger = rtOn ? num('rtFirstTouch') : num('normalPress');
-  document.getElementById('ttChecks').innerHTML = rtOn
+  setHtml('ttChecks', rtOn
     ? row('First trigger', tt.first, eff(trigger))
       + row('Re-press after', tt.rePress, num('rtPress'))
       + row('Release after', tt.rel, num('rtRelease'))
     : row('Fires at', tt.absPress, eff(trigger))
-      + row('Resets at', tt.absRelease, eff(trigger));
-  document.getElementById('ttHint').innerHTML = dead > trigger
+      + row('Resets at', tt.absRelease, eff(trigger)));
+  setHtml('ttHint', dead > trigger
     ? `<b>Top dead zone ${dead.toFixed(2)}mm is deeper than your ${rtOn ? 'first trigger' : 'actuation'} `
       + `setting ${trigger.toFixed(2)}mm, so the key really fires at ${dead.toFixed(2)}mm.</b> `
       + `Lower the dead zone to actually get ${trigger.toFixed(2)}mm.`
-    : 'Select a key and press it a few times - slowly is more accurate. Each press narrows the reading.';
+    : 'Select a key and press it a few times - slowly is more accurate. Each press narrows the reading.');
 }
 
 function clearTravelPaint() {
@@ -2389,7 +2417,8 @@ function scheduleTravelPaint() {
       const full = keyTravel.get(rc) || 3390;
       live.hidden = false;
       live.style.top = Math.max(0, Math.min(100, (route / full) * 100)) + '%';
-      live.querySelector('span').textContent = 'now ' + MM(route);
+      const span = live.querySelector('span'), label = 'now ' + MM(route);
+      if (span.textContent !== label) span.textContent = label;
     }
   });
 }
@@ -2397,9 +2426,12 @@ function scheduleTravelPaint() {
 // Like most vendor tools, this view does nothing until a key is picked - no idle sweep of
 // the whole board. A key is the ONLY thing painted too, never its row or anyone else's:
 // this loop only ever touches the one rc it is currently watching.
-let travelRunning = false;
+let travelRunning = false, travelGen = 0;
 async function travelLoop() {
-  while (travelRunning) {
+  // Generation guard - see keytestLoop().
+  const gen = ++travelGen;
+  const live = () => travelRunning && gen === travelGen;
+  while (live()) {
     if (device && !writing) {
       const rc = selected.values().next().value || null;
       if (rc !== tt.rc) {
@@ -2423,6 +2455,7 @@ async function travelLoop() {
         // logging both every time is exactly the hot loop the log's own cost punishes most.
         const ks = await getAxisRow(AXIS_MODE.KeyStatus, row, 300, true);
         const rt = await getAxisRow(AXIS_MODE.Route, row, 300, true);
+        if (!live()) break;
         if (rt && ks) {
           feedTT(rt.data[col], ks.data[col]);
           pendingWatched = { rc, route: rt.data[col] };
@@ -2432,7 +2465,7 @@ async function travelLoop() {
     }
     await new Promise(r => setTimeout(r, tt.rc ? 0 : 100));
   }
-  clearTravelPaint();
+  if (gen === travelGen) clearTravelPaint();
 }
 
 function setTravelTest(on) {
@@ -2454,27 +2487,36 @@ function setTravelTest(on) {
 // ---- Key test area ---------------------------------------------------------------
 // Purely a read loop, same KeyStatus command Travel test's own gauge already relies on -
 // this just paints every key on the board instead of tracking one.
-let keytestRunning = false;
+let keytestRunning = false, keytestGen = 0;
 function clearKeytestPaint() {
   for (const el of keyEl.values()) el.classList.remove('ktdown');
 }
+// Poll loops carry a generation: stopping one only flips a flag it sees on its next pass, so
+// a stop-then-start inside that pass used to leave the old loop running alongside the new
+// one (5 quick toggles measured 3-4 loops polling at once). A loop that finds a newer
+// generation just leaves, and leaves the paint to the loop that replaced it.
 async function keytestLoop() {
-  while (keytestRunning) {
+  const gen = ++keytestGen;
+  const live = () => keytestRunning && gen === keytestGen;
+  const byRow = new Map(KB_ROWS.map(r => [r, KEY_LAYOUT.map(([rc]) => [rc, ...rcOf(rc)]).filter(k => k[1] === r)]));
+  while (live()) {
     if (device && !writing) {
       for (const row of KB_ROWS) {
-        if (!keytestRunning) break;
         const ks = await getAxisRow(AXIS_MODE.KeyStatus, row, 300, true);
+        if (!live()) break;
         if (!ks) continue;
-        for (const [rc] of KEY_LAYOUT) {
-          const [r, c] = rcOf(rc);
-          if (r === row) keyEl.get(rc)?.classList.toggle('ktdown', ks.data[c] !== 0);
-        }
+        for (const [rc, , c] of byRow.get(row)) keyEl.get(rc)?.classList.toggle('ktdown', ks.data[c] !== 0);
       }
+      // About one sweep per frame: a held key is on screen for many frames, while back-to-back
+      // sweeps asked the keyboard for ~3200 status reports a second (measured on the board)
+      // that nobody could see. A timer, not requestAnimationFrame, which stalls in a
+      // background tab and would leave the loop parked there.
+      await new Promise(r => setTimeout(r, 16));
     } else {
       await new Promise(r => setTimeout(r, 100));
     }
   }
-  clearKeytestPaint();
+  if (gen === keytestGen) clearKeytestPaint();
 }
 function setKeytest(on) {
   if (on === keytestRunning) return;
@@ -2906,12 +2948,18 @@ async function loadLighting() {
   ledPreview(ledRunning);
 }
 
+// Plain on/off shortcut. Switching back on restores whichever LEDs were lit when it went off
+// (top only stays top only); with nothing remembered, "on" is both LEDs on a dual-LED
+// Keyboard area (LIGHT_OPEN.Open, byte 3) and plain 1 everywhere else.
+const lightOpenBeforeOff = {}; // area -> open byte it had when the toggle switched it off
 document.getElementById('lightToggle').onclick = () => {
-  // Plain on/off shortcut. "On" means both LEDs on a dual-LED Keyboard area (LIGHT_OPEN.Open,
-  // byte 3) so the toggle still reads as a simple switch; the layer row below is the only
-  // place OpenDown/OpenUp (bottom-only/top-only) are reachable.
-  const full = (dualLighting && lightArea === AREA.Keyboard) ? LIGHT_OPEN.Open : 1;
-  setLighting({ open: lightState.open ? LIGHT_OPEN.Close : full });
+  if (lightState.open) {
+    lightOpenBeforeOff[lightArea] = lightState.open;
+    setLighting({ open: LIGHT_OPEN.Close });
+  } else {
+    const full = (dualLighting && lightArea === AREA.Keyboard) ? LIGHT_OPEN.Open : 1;
+    setLighting({ open: lightOpenBeforeOff[lightArea] || full });
+  }
 };
 
 // Dragging fires continuously, so reuse the same debounce the performance sliders use
@@ -2993,12 +3041,16 @@ async function readFrame(area) {
 
 // Self-paced, like the travel-test poll: each pass waits for the last one, so a slow
 // machine stretches the interval instead of piling requests onto the io chain.
-let ledRunning = false;
+let ledRunning = false, ledGen = 0;
 async function ledLoop() {
-  while (ledRunning && device) {
+  // Generation guard - see keytestLoop(). Leaving the Lighting view and coming straight
+  // back used to leave the old mirror polling next to the new one.
+  const gen = ++ledGen;
+  const live = () => ledRunning && device && gen === ledGen;
+  while (live()) {
     try {
       const kbFrame = await readFrame(AREA.Keyboard);
-      if (!ledRunning) break;
+      if (!live()) break;
       if (kbFrame) for (const [rc, el] of keyEl) {
         const f = kbFrame[ledIndex.get(rc)];
         el.firstChild.style.background = f ? f.css : '';
@@ -3006,7 +3058,7 @@ async function ledLoop() {
       }
       if (stripLeds) {
         const dcFrame = await readFrame(AREA.Decorate1);
-        if (!ledRunning) break;
+        if (!live()) break;
         const strip = document.getElementById('ledStrip');
         if (dcFrame) {
           // The count at connect can only be a whole number of packets when the strip
@@ -3024,12 +3076,12 @@ async function ledLoop() {
       }
     } catch (err) {
       log('LED mirror stopped: ' + err.message);
-      ledRunning = false;
+      if (gen === ledGen) ledRunning = false;
       break;
     }
     await new Promise(r => setTimeout(r, 30));
   }
-  ledClear();
+  if (gen === ledGen) ledClear();
 }
 
 function ledClear() {
