@@ -263,6 +263,25 @@
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 24px; margin-top: -6px; background: var(--accent); border: 2px solid var(--ink); border-radius: 0; }
   input[type=range]::-moz-range-track { height: 16px; background: #FFF6E6; border: 2px solid var(--ink); }
   input[type=range]::-moz-range-thumb { width: 13px; height: 22px; background: var(--accent); border: 2px solid var(--ink); border-radius: 0; }
+
+  /* Real scrollbars get the same "square groove, square block" recipe as the range
+     slider just above, instead of the OS default - WebHID (and so this whole app) is
+     Chromium-only anyway, so the -webkit- pseudo-elements always apply where it matters.
+     End buttons are hidden rather than styled as tiny arrows: the range slider has no
+     step buttons either, just track+thumb, so this keeps the same shape. */
+  ::-webkit-scrollbar { width: 16px; height: 16px; }
+  ::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
+  ::-webkit-scrollbar-track { background: #FFF6E6; border: 2px solid var(--ink); }
+  ::-webkit-scrollbar-thumb { background: var(--accent); border: 2px solid var(--ink); }
+  ::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { background: var(--ink); }
+  ::-webkit-scrollbar-corner { background: #FFF6E6; }
+  /* The log is the one place this app inverts to a dark, terminal-style background - the
+     light track above would clash sitting inside it, so it gets the same shapes in the
+     log's own ink/desk/accent palette instead. */
+  #log::-webkit-scrollbar-track { background: var(--ink); border-color: var(--desk); }
+  #log::-webkit-scrollbar-thumb { background: var(--desk); border-color: var(--accent); }
+  #log::-webkit-scrollbar-thumb:hover, #log::-webkit-scrollbar-thumb:active { background: var(--accent); }
+
   .hint { margin: 0 0 12px; color: var(--muted); }
 
   .viewpanel h2 { margin-bottom: 8px; }
