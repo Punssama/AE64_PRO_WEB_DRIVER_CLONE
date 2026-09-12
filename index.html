@@ -234,9 +234,13 @@
   /* Visual square stays small (matches the reference), but the actual hit target is
      bigger - an 11px square is a fussy target for a real mouse, let alone a first
      attempt through a coordinate-relayed remote control. */
-  .dks-point { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; touch-action: none; user-select: none; }
+  .dks-point { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; touch-action: none; user-select: none; z-index: 1; }
   .dks-point::before { content: ''; width: 11px; height: 11px; background: var(--accent); border: 2px solid var(--ink); pointer-events: none; }
   .dks-val { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--ink); white-space: nowrap; background: var(--surface); padding: 0 2px; pointer-events: none; }
+  /* Fixed, non-interactive stops - the vendor's own DKS screen picks from a set of
+     positions rather than a free continuous drag ("select style", not a slider), so these
+     are always visible as a reference for where a drag will land. */
+  .dks-tick { position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%); width: 7px; height: 7px; background: var(--surface); border: 2px solid var(--muted); pointer-events: none; }
 
   .field { margin-bottom: 11px; }
   .field label { display: block; font-size: 17px; color: var(--muted); margin-bottom: 3px; }
@@ -4105,6 +4109,16 @@ function dksMirroredMm(pct, travel, half) {
 // mirror each one belongs on.
 const DKS_HALVES = ['press', 'press', 'release', 'release'];
 
+// The vendor's own DKS screen picks from a fixed row of positions rather than a free
+// continuous drag - "select style," not a slider. DKS_TICKS positions span each half's
+// own 0%-100% local range (11 = every 10%); a drag snaps to whichever is nearest instead
+// of landing on the exact pixel.
+const DKS_TICKS = 11;
+function dksSnapMm(mm, travel) {
+  const stepMm = travel / (DKS_TICKS - 1);
+  return stepMm > 0 ? Math.round(mm / stepMm) * stepMm : 0;
+}
+
 // DKS only: one row per output key (spec.rows.length of them), each showing the SAME
 // shared 4-point mirrored timeline - matching the vendor's own DKS screen, unlike the
 // per-stage sliders MPT/MT/TGL/END still use. All rows update together since they share
@@ -4146,6 +4160,15 @@ function renderDksTimeline(el, spec, kcs, nums, disabled, travelRaw) {
 
     const track = document.createElement('div');
     track.className = 'dks-track';
+    for (const half of ['press', 'release']) {
+      for (let t = 0; t < DKS_TICKS; t++) {
+        const tickMm = (t / (DKS_TICKS - 1)) * travel;
+        const tick = document.createElement('div');
+        tick.className = 'dks-tick';
+        tick.style.left = dksMirroredPct(tickMm, travel, half) + '%';
+        track.appendChild(tick);
+      }
+    }
     spec.rows.forEach((stageRow, idx) => {
       const half = DKS_HALVES[idx];
       const point = document.createElement('div');
@@ -4159,7 +4182,7 @@ function renderDksTimeline(el, spec, kcs, nums, disabled, travelRaw) {
           const move = ev => {
             const rect = track.getBoundingClientRect();
             const pointerPct = rect.width > 0 ? (ev.clientX - rect.left) / rect.width * 100 : 0;
-            nums[idx] = +dksMirroredMm(pointerPct, travel, half).toFixed(2);
+            nums[idx] = +dksSnapMm(dksMirroredMm(pointerPct, travel, half), travel).toFixed(2);
             updateStage(idx);
           };
           const up = () => { point.removeEventListener('pointermove', move); point.removeEventListener('pointerup', up); };
@@ -4555,6 +4578,10 @@ if (location.search.includes('selftest')) {
   console.assert(Math.abs(dksMirroredMm(75, 3.4, 'release') - 1.7) < 1e-9, 'dksMirroredMm: release half round-trips with dksMirroredPct');
   console.assert(dksMirroredMm(10, 3.4, 'release') === dksMirroredMm(50, 3.4, 'release'), 'dksMirroredMm: release half clamps below its own 50%-100% span');
   console.assert(dksMirroredMm(90, 3.4, 'press') === dksMirroredMm(50, 3.4, 'press'), 'dksMirroredMm: press half clamps above its own 0%-50% span');
+  console.assert(Math.abs(dksSnapMm(1.7, 3.4) - 1.7) < 1e-9, 'dksSnapMm: a value already on a tick stays put');
+  console.assert(Math.abs(dksSnapMm(1.5, 3.4) - 1.36) < 1e-9, 'dksSnapMm: snaps to the nearest of 11 ticks (10% steps)');
+  console.assert(dksSnapMm(0.05, 3.4) === 0, 'dksSnapMm: snaps down to 0 near the bottom tick');
+  console.assert(Math.abs(dksSnapMm(3.4, 3.4) - 3.4) < 1e-9, 'dksSnapMm: top tick matches full travel exactly');
 
   console.assert(eq(macroDataPacket(MACRO_SUB.GetData, 2, 1), [7, 3, 2, 1]), 'macro data read packet');
   {
