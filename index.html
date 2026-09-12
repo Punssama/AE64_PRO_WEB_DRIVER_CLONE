@@ -227,11 +227,15 @@
   .dks-header { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 4px 22px 28px; }
   .dks-rows { display: flex; flex-direction: column; gap: 24px; }
   .dks-row { display: flex; align-items: center; gap: 10px; }
-  .dks-track { position: relative; flex: 1; height: 8px; margin: 0 20px; background: #FFF6E6; border: 2px solid var(--ink); }
+  .dks-track { position: relative; flex: 1; height: 8px; margin: 0 20px; background: #FFF6E6; border: 2px solid var(--ink); user-select: none; }
   /* The seam between the press and release halves - purely a visual reference, not itself
      interactive. */
   .dks-track::after { content: ''; position: absolute; left: 50%; top: -5px; bottom: -5px; width: 2px; background: var(--ink); opacity: .35; }
-  .dks-point { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 11px; height: 11px; background: var(--accent); border: 2px solid var(--ink); cursor: ew-resize; touch-action: none; }
+  /* Visual square stays small (matches the reference), but the actual hit target is
+     bigger - an 11px square is a fussy target for a real mouse, let alone a first
+     attempt through a coordinate-relayed remote control. */
+  .dks-point { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; touch-action: none; user-select: none; }
+  .dks-point::before { content: ''; width: 11px; height: 11px; background: var(--accent); border: 2px solid var(--ink); pointer-events: none; }
   .dks-val { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--ink); white-space: nowrap; background: var(--surface); padding: 0 2px; pointer-events: none; }
 
   .field { margin-bottom: 11px; }
