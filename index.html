@@ -133,6 +133,12 @@
      dead-zones, END's delay) sit below as their own compact row. */
   .hkslots { display: flex; flex-direction: column; gap: 4px; }
   .hkstage { display: flex; align-items: center; gap: 8px; }
+  /* The stage rows share columns - name, key, unit, value - so Light, Medium and Heavy
+     start their sliders at the same x instead of wherever each name's width left them.
+     Not on #dksSlots: the DKS timeline draws its own rows into that box. */
+  #mptSlots, #mtSlots, #tglSlots, #endSlots { display: grid; grid-template-columns: repeat(4, max-content); gap: 8px; align-items: center; justify-content: start; }
+  #mptSlots .hkstage, #mtSlots .hkstage, #tglSlots .hkstage, #endSlots .hkstage { display: contents; }
+  .hkstage > :first-child { grid-column: 1; }
   .hkstage .ctl, .hknums .ctl { gap: 6px; }
   .hkstage input[type=range], .hknums input[type=range] { width: 90px; }
   .hkstage input[type=number], .hknums input[type=number] { width: 60px; padding: 2px 6px; }
@@ -170,7 +176,9 @@
   /* The strip carries its own dark bezel, so the panel does not need a full pad under
      it - and in a viewport-locked column those pixels belong to the settings view. */
   .kbpanel { min-width: 0; overflow-x: auto; padding-bottom: 3px; }
-  .viewpanel { min-height: 0; display: flex; flex-direction: column; }
+  /* min-width 0 for the same reason as .kbpanel: a wide view scrolls inside its own box
+     instead of widening the column and sliding under the Travel panel. */
+  .viewpanel { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
   .view { flex: 1; min-height: 0; overflow: auto; }
   /* Column so Apply stays pinned at the bottom - it must not jump when the taller
      Rapid-trigger tab swaps in for the shorter Dead-zone one. */
@@ -376,20 +384,28 @@
   #view-remap .tabs { margin-bottom: 6px; }
   .kp { display: flex; gap: 9px; align-items: flex-start; }
   /* Seven feature tabs have to fit one row of the centre column; 150px each would not. */
-  #view-adv .tabs { margin-bottom: 3px; }
   #view-adv .tab { min-width: 0; padding: 2px 14px; }
   .socd { display: flex; gap: 24px; align-items: flex-start; }
-  .socd-edit { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; line-height: 1.2; }
+  .socd-edit { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; line-height: 1.2; }
   .socd-edit .hint { margin: 0; }
+  /* A status line with nothing to say (and an empty step list) would still take a gap. */
+  .socd-edit .hint:empty, #macroSteps:empty { display: none; }
+  /* Steps line up so every step's remove button sits in one column. */
+  #macroSteps { display: flex; flex-direction: column; gap: 4px; }
+  #macroSteps .socd-row span { min-width: 11em; }
   .socd-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .socd-row input[type=number] { width: 64px; padding: 2px 6px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font-family: var(--term); font-size: 20px; text-align: right; }
   /* Bind/Delete are secondary actions on an already-tight view, not the app's main call
      to action, so they don't need the full button size everything else gets. */
   .socd-edit .socd-row button { padding: 3px 11px; }
   .socd-list { flex: 0 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-  #socdList { display: flex; flex-direction: column; gap: 4px; }
-  #socdList button { text-align: left; padding: 4px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--shadow); }
-  #socdList button.on, #socdList button.on:hover { background: var(--sel-bg); color: var(--sel-fg); }
+  /* Every saved-bindings list (SOCD, RS, MPT, MT, TGL, END, macro slots) - only SOCD's
+     had these rules, so the others wrapped sideways and never showed which one was open. */
+  .socd-list > div { display: flex; flex-direction: column; gap: 4px; }
+  .socd-list > div button { text-align: left; padding: 4px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--shadow); }
+  .socd-list > div button.on, .socd-list > div button.on:hover { background: var(--sel-bg); color: var(--sel-fg); }
+  /* 16 fixed slots: an even grid, not a 16-row column taller than the view. */
+  #macroList { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
   .socd-list .hint, .socd-list .muted { margin: 0; }
   .kp-block { display: flex; flex-direction: column; gap: 2px; }
   .kp-row { display: flex; gap: 2px; }
@@ -418,16 +434,26 @@
   #ttChecks { margin-top: 6px; }
   /* Calibration rewrites every key's stored axis data, so its screen is styled to be
      read before it is clicked, not after. */
-  .warn { border: 2px solid var(--line); background: var(--accent); color: var(--on-accent); padding: 3px 8px; margin: 0 0 2px; }
-  /* Button and status share a row: giving the status its own line pushed this view 8px
-     past the 142px the centre panel has. */
-  .calrow { display: flex; align-items: center; gap: 14px; }
-  .calrow .hint { margin: 0; }
+  .warn { border: 2px solid var(--line); background: var(--accent); color: var(--on-accent); padding: 3px 8px; margin: 0 0 12px; }
+  /* An action and the status it reports share a row, so the result lands where the eye
+     already is instead of on a line of its own under the button. */
+  .actrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .actrow .hint { margin: 0; }
+  /* A second, separate job inside one view (Restore under Save, Anti-ghosting under the
+     rate) gets the same rule-and-gap the Lighting view uses for custom per-key colour, so
+     every view splits its groups the same way. */
+  .group { margin-top: 20px; padding-top: 16px; border-top: 2px solid var(--line); }
+  /* The native file picker otherwise renders in the OS sans-serif with a rounded grey
+     button - the one control on the page that looked like it came from somewhere else. */
+  input[type=file] { font-family: var(--term); font-size: 18px; color: var(--muted); }
+  input[type=file]::file-selector-button { font: inherit; color: var(--ink); background: var(--surface); border: 2px solid var(--line); box-shadow: 3px 3px 0 var(--shadow); padding: 5px 13px; margin: 0 12px 3px 0; cursor: pointer; }
+  input[type=file]::file-selector-button:hover { background: var(--accent); color: var(--on-accent); }
 
   /* Lighting: direction (2) and the palette (8 slots) are small fixed sets, so they are
      buttons. Brightness and speed turned out to be 0-100, and the 23 effects are a
      dropdown - both too many to spell out as buttons in this panel. */
   .lightrow { display: flex; align-items: center; gap: 14px; margin-bottom: 5px; }
+  #view-light > .lightrow { margin-bottom: 16px; }
   .lightrow .toggle { margin-bottom: 0; width: 200px; flex: none; }
   .lightrow .hint { margin: 0; }
   .lightrow select { padding: 4px 8px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font-family: var(--term); font-size: 20px; }
@@ -607,18 +633,24 @@
 
     <div class="view" id="view-backup" hidden>
       <p class="hint">Saves everything this tool can read from the active config: performance settings, both keymap layers, advanced keys, lighting, and polling rate. Calibration is not included.</p>
-      <button id="backupSave" disabled>Save backup to file</button>
-      <p class="hint" id="backupSaveState"></p>
-      <p class="warn">Restoring overwrites the ENTIRE active config with whatever is in the file.</p>
-      <input type="file" id="backupFile" accept="application/json" disabled>
-      <button id="backupRestore" class="danger" data-armed="0" disabled>Restore from file</button>
-      <p class="hint" id="backupRestoreState"></p>
+      <div class="actrow">
+        <button id="backupSave" disabled>Save backup to file</button>
+        <span class="hint" id="backupSaveState"></span>
+      </div>
+      <div class="group">
+        <p class="warn">Restoring overwrites the ENTIRE active config with whatever is in the file.</p>
+        <div class="actrow">
+          <input type="file" id="backupFile" accept="application/json" disabled>
+          <button id="backupRestore" class="danger" data-armed="0" disabled>Restore from file</button>
+          <span class="hint" id="backupRestoreState"></span>
+        </div>
+      </div>
     </div>
 
     <div class="view" id="view-calibration" hidden>
       <p class="warn"><b>Replaces the stored calibration on every key.</b> Press every key fully
         down and release, then Finish. Stopping halfway leaves keys half-learned - just run it again.</p>
-      <div class="calrow">
+      <div class="actrow">
         <button id="calStart" class="danger" data-armed="0">Start calibration</button>
         <button id="calFinish" hidden>Finish calibration</button>
         <span class="hint" id="calState">Not running.</span>
@@ -631,12 +663,16 @@
           <label>Rate</label>
           <div class="pick" id="rate"></div>
         </div>
-        <button id="getRate">Read current</button>
-        <button id="setRate">Apply rate</button>
-        <p class="hint">Anti-ghosting resets to ON every time the keyboard is unplugged - that is the firmware's own default, not a bug here.</p>
-        <button id="shakeToggle" class="toggle" aria-pressed="false">
-          <span>Anti-ghosting</span><span class="tog">?</span>
-        </button>
+        <div class="actrow">
+          <button id="getRate">Read current</button>
+          <button id="setRate">Apply rate</button>
+        </div>
+        <div class="group actrow">
+          <button id="shakeToggle" class="toggle" aria-pressed="false">
+            <span>Anti-ghosting</span><span class="tog">?</span>
+          </button>
+          <span class="hint">Resets to ON every time the keyboard is unplugged - that is the firmware's own default, not a bug here.</span>
+        </div>
     </div>
 
     <div class="view" id="view-remap" hidden>
@@ -837,8 +873,8 @@
         <span class="hint" id="lightNote">Each area has its own effect and switch.</span>
       </div>
 
-      <div class="light-section">
-        <span class="light-label">Effect</span>
+      <div class="field light-section">
+        <label>Effect</label>
         <div class="pick" id="lightModes"></div>
       </div>
 
@@ -2104,7 +2140,7 @@ function renderMacroList() {
 async function selectMacroSlot(id) {
   macroSelected = id;
   document.getElementById('macroHint').textContent = '';
-  document.getElementById('macroSlotLabel').textContent = 'Slot ' + id;
+  document.getElementById('macroSlotLabel').textContent = id;
   const meta = macroCache.get(id);
   macroSteps = meta?.valid ? (await getMacroActions(id, meta.actNum)) || [] : [];
   document.getElementById('macroRepeat').value = meta?.repNum || 1;
@@ -3207,10 +3243,17 @@ const KP_GAP = 2;
 function pickerSize() {
   const view = document.getElementById('view-remap');
   const tabs = view.querySelector('.tabs');
-  const used = tabs.getBoundingClientRect().height + parseFloat(getComputedStyle(tabs).marginBottom || 0);
+  // Everything above the picker, measured to the tabs' bottom edge - the tabs alone left
+  // out the system-type hint over them, so the last row sank below the fold.
+  const used = tabs.getBoundingClientRect().bottom - view.getBoundingClientRect().top + view.scrollTop
+             + parseFloat(getComputedStyle(tabs).marginBottom || 0);
   const rows = PICKER_MAIN.length;
   const avail = view.clientHeight - used - (rows - 1) * KP_GAP;
-  const h = Math.max(17, Math.min(34, Math.floor(avail / rows)));
+  // Width binds too, on a laptop-size window: 15 units of main block + 3 of nav cluster
+  // + the 9px .kp gap, with 20px slack for rounding u - sized by height alone, the
+  // picker ran under the Travel column at 1366px wide.
+  const byWidth = (view.clientWidth - 20) / 18 / 1.55;
+  const h = Math.max(17, Math.min(34, Math.floor(avail / rows), Math.floor(byWidth)));
   return { h, u: Math.round(h * 1.55) };
 }
 const PICKER_MAIN = [
@@ -3390,7 +3433,7 @@ function renderRemap() {
     const [r, c] = rc.split('-').map(Number);
     const cur = layerCur(remapLayer);
     code = cur && cur[r] ? cur[r][c] : -1;
-    who.textContent = (remapLayer ? 'Fn + ' : '') + KEY_LABEL.get(rc) + ' sends: ' + keyName(code);
+    who.textContent = (remapLayer ? 'Fn + ' : '') + KEY_LABEL.get(rc) + ' sends: ' + (code < 0 ? 'not read yet' : keyName(code));
   }
   const arm = document.getElementById('remapDefaults');
   if (arm.dataset.armed !== '1') arm.textContent = 'Restore ' + (remapLayer ? 'FN layer' : 'base layer');
