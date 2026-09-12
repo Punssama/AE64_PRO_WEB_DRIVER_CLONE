@@ -948,7 +948,7 @@ const MACRO_SUB = { GetMode: 1, SetMode: 2, GetData: 3, SetData: 4 };
 // The firmware itself caps a macro step's delay here - the vendor bundle throws above it.
 const MACRO_DELAY_MAX = 32767;
 const MACRO_ACTIONS_PER_PACKET = 15; // 60 of the 64 bytes hold actions; the leading 4 are the header.
-const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5, CalibrationSetting: 6, ShakeOptimizationSwitch: 16, SystemSetting: 4, MacroSpaceInfoQuery: 14, DoubleLightingQuery: 10, RtPrecisionQuery: 12 };
+const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5, CalibrationSetting: 6, ShakeOptimizationSwitch: 16, SystemSetting: 4, MacroSpaceInfoQuery: 14, DoubleLightingQuery: 10, RtPrecisionQuery: 12, EffectAreaQuery: 8 };
 // ConfigSwitch's third byte is NOT the QR enum the other commands use: 0/1/2 line up
 // with ReadList/Read/Write, but 3 and 4 are name get/set, which QR has no values for.
 const CFG_OP = { List: 0, Read: 1, Switch: 2, GetName: 3, SetName: 4 };
@@ -982,8 +982,9 @@ const LIGHT_SUB_CUSTOM = 4;
 // id 0..22 - no names, no gaps - so the mode byte is just the index. That list is shared
 // across every model though: THIS keyboard only uses the first 20 on the main LEDs and
 // the first 5 on the decorative strip, which is what the vendor app offers. The firmware
-// will happily store mode 25, so nothing here can be verified against the device - these
-// two numbers come from the vendor UI and are the only honest source for them.
+// will happily store mode 25, so a write's echo cannot confirm a count - but the keyboard
+// does report its counts through EffectAreaQuery (see getLightingAreaInfo), and these two
+// numbers are only the fallback for firmware that does not answer it.
 const LIGHT_MODE_COUNT = { keyboard: 20, decorate: 5 };
 // The SDK carries Brightness1..4 and Speed1..5 enums, but THIS firmware does not use
 // them: it reports 100 for both and stores whatever byte you send (200 echoes back as
@@ -2725,7 +2726,22 @@ let lightStates = {};       // every area's state - the lights all run at once
 let stripLeds = 0;          // decorative LED count, counted off the device
 let dualLighting = false;   // true if this board has an upper+lower LED per key, not just one
 let lightArea = AREA.Keyboard;
-const modeCount = a => (a === AREA.Keyboard ? LIGHT_MODE_COUNT.keyboard : LIGHT_MODE_COUNT.decorate);
+// The keyboard reports each area's effect count itself (getLightingAreaInfo below); the
+// constants are only the fallback for firmware that does not answer that query.
+let areaModes = {};
+const modeCount = a => areaModes[a] || (a === AREA.Keyboard ? LIGHT_MODE_COUNT.keyboard : LIGHT_MODE_COUNT.decorate);
+
+// Global/EffectAreaQuery [2,8,0], the vendor's getLightingArea(): byte 3 is how many light
+// areas the board has, then four bytes per area - its index, its effect count, and its LED
+// grid as rows and cols. This AE64 Pro answers [2,8,0, 2, 0,20,6,15, 1,5,1,38]: the main
+// keyboard with 20 effects and the decorative strip with 5 effects on 1x38 LEDs - the same
+// 20/5 the vendor UI offers and the 38 counted off the strip. One exchange, where probing
+// all six areas sat out a timeout for each of the four this board does not have.
+async function getLightingAreaInfo() {
+  const r = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.EffectAreaQuery, 0], 600);
+  if (!r || r[0] !== CATEGORY.Global || !r[3] || r[3] > 6) return null;
+  return Array.from({ length: r[3] }, (_, i) => ({ area: r[4 + 4 * i], modes: r[5 + 4 * i], rows: r[6 + 4 * i], cols: r[7 + 4 * i] }));
+}
 
 function decodeLight(res) {
   // Kept as the raw byte rather than squashed to 0/1: on a dual-LED board this is one of
@@ -2903,6 +2919,10 @@ function renderStripDom(n) {
 
 async function loadLighting() {
   if (!lightAreas.length) {
+    const info = await getLightingAreaInfo();
+    // 23 is the length of the vendor's shared effect label list (L1..L23) - anything outside
+    // 1..23 is not an effect count, so the constants stay.
+    areaModes = Object.fromEntries((info || []).filter(a => a.modes >= 1 && a.modes <= 23).map(a => [a.area, a.modes]));
     let shape = null;
     try { shape = JSON.parse(localStorage.getItem(lightShapeKey())); } catch (err) { /* private mode, corrupt value, etc - just re-discover below */ }
     if (shape && Array.isArray(shape.areas) && shape.areas.length) {
@@ -2933,13 +2953,23 @@ async function loadLighting() {
       // hardware response," not a measured floor - every reply actually seen on this board
       // (present areas included) lands well under it. If a real area ever gets miscounted as
       // absent, raise this, not the whole function's timeout.
-      for (let a = AREA.Keyboard; a <= 5; a++) {
+      // Asked outright when the firmware answers EffectAreaQuery; probed area by area only
+      // when it does not.
+      for (const a of info ? info.map(x => x.area) : [0, 1, 2, 3, 4, 5]) {
         const st = await getLighting(a, 250);
         if (st) { lightAreas.push(a); lightStates[a] = st; }
       }
       // The mirror needs to know how many packets a frame takes before it can read one.
       await countSlots(AREA.Keyboard);
-      if (lightAreas.includes(AREA.Decorate1)) await buildStrip();
+      const strip = info?.find(x => x.area === AREA.Decorate1);
+      if (strip && strip.rows * strip.cols > 0 && lightAreas.includes(AREA.Decorate1)) {
+        // The reported grid is exact whatever the strip happens to show - counting lit slots
+        // (buildStrip) undercounts on a dark effect.
+        stripLeds = strip.rows * strip.cols;
+        ledPackets[AREA.Decorate1] = Math.ceil(stripLeds / 15);
+        renderStripDom(stripLeds);
+        log('Decorative strip: ' + stripLeds + ' LEDs (reported by the keyboard).');
+      } else if (lightAreas.includes(AREA.Decorate1)) await buildStrip();
       log('Lighting areas: ' + (lightAreas.map(areaName).join(', ') || 'none'));
       try {
         localStorage.setItem(lightShapeKey(), JSON.stringify({ areas: lightAreas, packets: ledPackets, stripLeds }));
