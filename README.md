@@ -41,9 +41,10 @@ no framework — vanilla JS and the WebHID API.
   keys you have already pressed.
 - **Polling rate** — 125 Hz to 8000 Hz.
 - **Lighting** — effect, brightness, speed, direction and colour for each light area,
-  custom per-key colours, and on this dual-LED board the upper LED (lights the keycap)
-  and lower LED (lights around the switch) separately. The virtual keyboard mirrors
-  what the board is lighting, live.
+  custom per-key colours, and on this dual-LED board (one LED above and one below each
+  switch) the top and bottom LEDs separately. The virtual keyboard mirrors what the
+  board is lighting, live - the top half of a key for the top LED, the bottom half for
+  the bottom one.
 - **Dark theme** — a switch in the title bar; it follows the OS setting until you pick.
 - **Travel gauge** — a live meter drawn from the key's real measured travel, read from
   the device, not assumed.

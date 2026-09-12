@@ -3810,7 +3810,9 @@ document.getElementById('backupSave').onclick = async () => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `ae64-backup-${data.configName.replace(/\W+/g, '_')}-${Date.now()}.json`;
+  // Only characters a filename cannot hold are replaced - \W also ate every letter of a name
+  // like 配置三, leaving ae64-backup-_-<time>.json.
+  a.download = `ae64-backup-${data.configName.replace(/[\\/:*?"<>|\s]+/g, '_')}-${Date.now()}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
   document.getElementById('backupSaveState').textContent = 'Saved.';

@@ -27,7 +27,7 @@ không thư viện, chỉ JavaScript thuần và WebHID.
 | **Travel test**   | **Kiểm chứng** phím có thật sự kích hoạt đúng độ sâu bạn đặt hay không                |
 | **Calibration**   | Bắt bàn phím học lại điểm trên/dưới của từng switch                                   |
 | **Polling rate**  | 125 Hz đến 8000 Hz                                                                    |
-| **Đèn**           | Hiệu ứng, độ sáng, tốc độ, hướng và màu cho từng vùng đèn, tô màu riêng từng phím; với bàn dual LED này thì bật riêng được LED trên (sáng mặt keycap) và LED dưới (sáng quanh switch). Bàn phím ảo hiện trực tiếp đèn đang sáng |
+| **Đèn**           | Hiệu ứng, độ sáng, tốc độ, hướng và màu cho từng vùng đèn, tô màu riêng từng phím; với bàn dual LED này thì bật riêng được LED trên và LED dưới của mỗi switch. Bàn phím ảo hiện trực tiếp đèn đang sáng: nửa trên phím cho LED trên, nửa dưới cho LED dưới |
 | **Dark theme**    | Công tắc trên thanh tiêu đề; mặc định theo chế độ sáng/tối của hệ điều hành cho tới khi bạn tự chọn |
 | **Nhật ký HID**   | Xem từng gói tin gửi/nhận, để biết chính xác cái gì đã được gửi đi                    |
 
