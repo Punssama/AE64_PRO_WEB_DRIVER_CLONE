@@ -98,6 +98,7 @@
   #configPicker label { font-size: 15px; color: var(--ink); opacity: .75; letter-spacing: .09em; }
   #configSelect { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: var(--accent); color: var(--ink); font-family: var(--term); font-size: 17px; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
   #configSelect:disabled { background: var(--surface); cursor: not-allowed; }
+  #configNameInput { width: 100%; padding: 5px 6px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 17px; }
   .navbtn { width: 100%; text-align: left; }
   /* Every entry sits under a heading naming what it is about, so the list can grow a view
      without turning into one long column to scan top to bottom. */
@@ -342,6 +343,8 @@
     <div id="configPicker">
       <label for="configSelect">CONFIG</label>
       <select id="configSelect" disabled><option>--</option></select>
+      <input id="configNameInput" type="text" maxlength="32" hidden>
+      <button id="configRenameBtn" disabled>Rename</button>
     </div>
     <span class="navgroup">TRIGGER</span>
     <button class="navbtn" data-view="performance">Settings</button>
@@ -1469,8 +1472,27 @@ function configLabel(id) {
   return configNames.get(id) || `Config ${id + 1}`;
 }
 
+// Same trim rule as the vendor's own encoder (GFSConfigNameSet): cut a character, not a
+// byte, so a multi-byte character at the 32-byte boundary is never split in half.
+function encodeConfigName(name) {
+  const enc = new TextEncoder();
+  let s = name, bytes = enc.encode(s);
+  while (bytes.length > 32) { s = s.slice(0, -1); bytes = enc.encode(s); }
+  return bytes;
+}
+async function setConfigName(id, name) {
+  const res = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.SetName, id, ...encodeConfigName(name)]);
+  if (!res) return false;
+  // Read back rather than trust the echo - same rule as every other write in this file.
+  const after = await getConfigName(id);
+  configNames.set(id, after);
+  renderConfigPicker();
+  return after === new TextDecoder('utf-8').decode(encodeConfigName(name));
+}
+
 function renderConfigPicker() {
   const sel = document.getElementById('configSelect');
+  document.getElementById('configRenameBtn').disabled = !configCount;
   sel.innerHTML = '';
   if (!configCount) {
     sel.append(new Option('--', ''));
@@ -1485,6 +1507,29 @@ function renderConfigPicker() {
 }
 
 document.getElementById('configSelect').onchange = e => switchConfig(Number(e.target.value));
+
+document.getElementById('configRenameBtn').onclick = () => {
+  const sel = document.getElementById('configSelect'), inp = document.getElementById('configNameInput');
+  sel.hidden = true; inp.hidden = false;
+  inp.value = configLabel(currentConfig);
+  inp.focus(); inp.select();
+};
+document.getElementById('configNameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') e.target.blur();
+  if (e.key === 'Escape') { e.target.dataset.cancel = '1'; e.target.blur(); }
+});
+document.getElementById('configNameInput').addEventListener('blur', async e => {
+  const cancel = e.target.dataset.cancel === '1';
+  e.target.dataset.cancel = '';
+  document.getElementById('configSelect').hidden = false;
+  e.target.hidden = true;
+  const name = e.target.value.trim();
+  if (cancel || !name || !device) return;
+  saveState('Renaming...', true);
+  const ok = await setConfigName(currentConfig, name);
+  saveState(ok ? 'Renamed' : 'Rename refused', !ok);
+  log(ok ? `Config ${currentConfig} renamed to "${name}"` : `Config ${currentConfig} rename: device did not confirm the new name.`);
+});
 
 async function loadConfigs() {
   const list = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.ConfigSwitch, CFG_OP.List]);
@@ -3931,6 +3976,11 @@ if (location.search.includes('selftest')) {
                    'a SOCD-paired key that is also Rapid Trigger must still show its chip');
     kb.classList.remove('adv'); sample.remove();
   }
+
+  console.assert(encodeConfigName('Gaming').length === 6, 'a short ascii name is not trimmed');
+  console.assert(encodeConfigName('x'.repeat(40)).length === 32, 'an over-long name is trimmed to fit 32 bytes');
+  console.assert(new TextDecoder().decode(encodeConfigName('日本語'.repeat(20))).length > 0, 'trimming a multibyte name never splits a character in half');
+
   console.log('selftest done');
 }
 
