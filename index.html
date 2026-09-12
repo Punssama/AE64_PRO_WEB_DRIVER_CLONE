@@ -31,6 +31,8 @@
     --live: #FAE7CB;
     --danger: #B33A3A;
     --on-danger: #FAE7CB;
+    --key-unlit: #2B4A40;
+    --legend-unlit: #D9CDB5;
     --term: 'VT323', 'Courier New', monospace;
   }
   * { box-sizing: border-box; }
@@ -182,37 +184,18 @@
      or a dark legend on a bright key sits in its own muddy halo. */
   #kb.lit .kb-key .cap { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85); }
   #kb.lit .kb-key.brightled .cap { color: #14201b; text-shadow: 0 1px 2px rgba(255,255,255,.7); }
-  /* Dual-LED boards: each socket has an upper and a lower LED, and the Keyboard area's
-     open byte says which are lit (paintLedLayer). Both are drawn as a row of pixels on the
-     cap's top and bottom edge - hot pixels with ink gaps when lit, faint when off, so the
-     socket always reads as two LEDs. The ink gaps are what carry a lit strip on a white
-     key (a solid white strip vanished there, on the real board's static white effect);
-     the hot pixels carry it on a dark one. With only one lit, the face falls off in hard
-     bands away from it, since that is the edge the light comes from. Custom properties so
-     each of the four states only swaps the layers that change. */
-  #kb.lit.dual {
-    --strip-up: repeating-linear-gradient(90deg, rgba(255,255,255,.2) 0 5px, transparent 5px 7px) left top / 100% 3px no-repeat;
-    --strip-down: repeating-linear-gradient(90deg, rgba(255,255,255,.2) 0 5px, transparent 5px 7px) left bottom / 100% 3px no-repeat;
-    --falloff: none;
-  }
-  #kb.lit.dual.led-up {
-    --strip-up: repeating-linear-gradient(90deg, #FFFCEF 0 5px, var(--ink) 5px 7px) left top / 100% 4px no-repeat,
-                linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.45)) left 0 top 4px / 100% 1px no-repeat;
-  }
-  #kb.lit.dual.led-down {
-    --strip-down: repeating-linear-gradient(90deg, #FFFCEF 0 5px, var(--ink) 5px 7px) left bottom / 100% 4px no-repeat,
-                  linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.45)) left 0 bottom 4px / 100% 1px no-repeat;
-  }
-  #kb.lit.dual.led-up:not(.led-down) { --falloff: linear-gradient(to bottom, transparent 0 30%, rgba(12,31,25,.5) 30% 70%, rgba(12,31,25,.88) 70%); }
-  #kb.lit.dual.led-down:not(.led-up) { --falloff: linear-gradient(to top, transparent 0 30%, rgba(12,31,25,.5) 30% 70%, rgba(12,31,25,.88) 70%); }
-  /* Both off goes dark whatever the frame says - the layer byte decides what is lit, and
-     a frame still carrying effect colours would otherwise show a lit board. */
-  #kb.lit.dual:not(.led-up):not(.led-down) { --falloff: linear-gradient(rgba(12,31,25,.88), rgba(12,31,25,.88)); }
-  #kb.lit.dual .kb-key .led::before { content: ''; position: absolute; inset: 0; background: var(--strip-up), var(--strip-down), var(--falloff); }
-  /* Unless both are lit, the legend sits on a darkened face, where the bright-LED dark
-     legend would vanish - keep it white. */
-  #kb.lit.dual:not(.led-up) .kb-key.brightled .cap,
-  #kb.lit.dual:not(.led-down) .kb-key.brightled .cap { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85); }
+  /* Dual-LED boards: each socket has an upper LED, which backlights the keycap, and a
+     lower one, which lights the plate around the switch - so the mirror draws them where
+     they land. Upper LED = the lit face; lower LED = a ring of light in the gap around the
+     key (paintLedLayer sets which). With its upper LED off a face drops to an unlit keycap
+     whatever the frame says: the firmware keeps reporting the effect colour for keys whose
+     upper LED is off (seen on the real board), so only the layer byte knows what is lit.
+     The ring is a hard 2px spread, no blur: caps sit ~3.85px apart, so neighbouring rings
+     meet in the gap as one lit grid without spilling onto either face. */
+  #kb.lit.dual:not(.led-up) .kb-key .led::before { content: ''; position: absolute; inset: 0; background: var(--key-unlit); }
+  #kb.lit.dual:not(.led-up) .kb-key .cap,
+  #kb.lit.dual:not(.led-up) .kb-key.brightled .cap { color: var(--legend-unlit); text-shadow: none; }
+  #kb.lit.dual.led-down .kb-key { box-shadow: 0 0 0 2px var(--led, transparent); }
   #kb .kb-key:hover { background: var(--accent); color: var(--on-accent); }
   #kb .kb-key.selected, #kb .kb-key.ktdown { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--on-accent); }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
@@ -413,13 +396,13 @@
   .pick { display: flex; gap: 4px; flex-wrap: wrap; }
   .pick button { padding: 3px 9px; font-size: 17px; box-shadow: 2px 2px 0 var(--shadow); min-width: 34px; }
   .pick button.on, .pick button.on:hover { background: var(--sel-bg); color: var(--sel-fg); }
-  /* The LED layer buttons draw the same two edge strips the board does, so the control
-     and the keys read as one picture: a filled band is a lit LED. currentColor, so the
-     selected (inverted) button's icon inverts with it. */
-  .layer-ico { position: relative; display: inline-block; width: 13px; height: 15px; margin-right: 6px; vertical-align: -3px; border: 2px solid currentColor; }
-  .layer-ico.up::before, .layer-ico.down::after { content: ''; position: absolute; left: 0; right: 0; height: 3px; background: currentColor; }
-  .layer-ico.up::before { top: 0; }
-  .layer-ico.down::after { bottom: 0; }
+  /* The LED layer buttons draw the same picture as the keys: a small keycap whose face
+     fills when the upper LED is on, inside a ring that shows when the lower one is.
+     currentColor, so the selected (inverted) button's icon inverts with it. */
+  .layer-ico { position: relative; display: inline-block; width: 16px; height: 16px; margin-right: 7px; vertical-align: -3px; border: 2px solid transparent; }
+  .layer-ico.down { border-color: currentColor; }
+  .layer-ico::before { content: ''; position: absolute; inset: 2px; border: 2px solid currentColor; }
+  .layer-ico.up::before { background: currentColor; }
   /* Lighting had every control (area, 20-effect picker, five parameter fields, custom
      paint) packed edge to edge with no grouping - same small-caps label already used for
      the sidebar's own TRIGGER/KEYS/DEVICE groups, plus real spacing between groups, so
@@ -2725,8 +2708,9 @@ function renderLighting() {
   const showLayer = dualLighting && lightArea === AREA.Keyboard;
   document.getElementById('lightLedLayerField').hidden = !showLayer;
   if (showLayer) {
-    const layerLabel = ['Off', 'Bottom', 'Top', 'Both'];
-    const layerTitle = ['Both LEDs off', 'Lower LED only', 'Upper LED only', 'Upper and lower LED'];
+    const layerLabel = ['Off', 'Lower', 'Upper', 'Both'];
+    const layerTitle = ['Both LEDs off', 'Lower LED only - lights around the key',
+                        'Upper LED only - lights the keycap', 'Upper and lower LED'];
     const row = document.getElementById('lightLedLayer');
     pickRow(row, layerLabel.length, st ? st.open : -1,
             i => layerLabel[i], i => setLighting({ open: i }), !st);
@@ -2930,6 +2914,9 @@ async function ledLoop() {
       if (kbFrame) for (const [rc, el] of keyEl) {
         const f = kbFrame[ledIndex.get(rc)];
         el.firstChild.style.background = f ? f.css : '';
+        // The same colour again on the key itself, for the lower-LED ring drawn outside it -
+        // the .led layer inside can't paint there, since the cap clips its children.
+        el.style.setProperty('--led', f ? f.css : 'transparent');
         el.classList.toggle('brightled', !!f && f.bright);
       }
       if (stripLeds) {
@@ -2963,6 +2950,7 @@ async function ledLoop() {
 function ledClear() {
   for (const el of keyEl.values()) {
     el.firstChild.style.background = '';
+    el.style.removeProperty('--led');
     el.classList.remove('brightled');
   }
   document.getElementById('kb').classList.remove('lit');
