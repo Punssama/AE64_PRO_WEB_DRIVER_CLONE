@@ -2233,13 +2233,22 @@ document.getElementById('macroPlay').onclick = async () => {
 };
 document.getElementById('macroSave').onclick = async () => {
   if (!device || macroSelected == null) return;
-  if (!(await setMacroActions(macroSelected, macroSteps))) { log('Macro: save failed (data write).'); return; }
+  if (!macroSteps.length) { log('Macro: nothing to save - record at least one step first.'); return; }
   const repeat = Math.max(1, Math.min(255, parseInt(document.getElementById('macroRepeat').value) || 1));
   // mode is left at whatever this slot already had - its value space isn't confirmed
   // anywhere, so only actNum/repNum/valid change here.
   const prev = await getMacroMode(macroSelected) || { mode: 0 };
+  // Mode FIRST, then the steps - the order the vendor's own config import uses, and the only
+  // one that works: writing the mode (re)allocates the slot's storage, so steps sent before
+  // it were wiped and read back as erased flash (every step 0xFFFFFFFF). Found on the board.
   const meta = await setMacroMode(macroSelected, { valid: true, actNum: macroSteps.length, repNum: repeat, mode: prev.mode });
-  log(meta ? `Macro ${macroSelected}: saved ${macroSteps.length} step(s).` : 'Macro: save failed (mode write).');
+  if (!meta) { log('Macro: save failed (mode write).'); return; }
+  if (!(await setMacroActions(macroSelected, macroSteps))) { log('Macro: save failed (data write).'); return; }
+  const want = macroSteps.map(s => ({ down: s.down, delay: Math.min(s.delay, MACRO_DELAY_MAX), code: s.code & 0xffff }));
+  const back = await getMacroActions(macroSelected, want.length);
+  log(back && JSON.stringify(back) === JSON.stringify(want)
+    ? `Macro ${macroSelected}: saved ${want.length} step(s), read back OK.`
+    : `Macro ${macroSelected}: saved, but the steps read back differently - save again.`);
   await loadMacroList();
 };
 document.getElementById('macroDelete').onclick = async () => {
