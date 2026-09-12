@@ -168,7 +168,7 @@
   #kb.lit .kb-key .cap { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.85); }
   #kb.lit .kb-key.brightled .cap { color: #14201b; text-shadow: 0 1px 2px rgba(255,255,255,.7); }
   #kb .kb-key:hover { background: var(--accent); }
-  #kb .kb-key.selected { background: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
+  #kb .kb-key.selected, #kb .kb-key.ktdown { background: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
   #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 12px; line-height: 1.15; background: var(--ink); color: var(--accent); }
   #kb .kb-key.rt .tag { display: block; }
@@ -349,6 +349,7 @@
     <span class="navgroup">TRIGGER</span>
     <button class="navbtn" data-view="performance">Settings</button>
     <button class="navbtn" data-view="traveltest">Travel test</button>
+    <button class="navbtn" data-view="keytest">Key test</button>
     <button class="navbtn" data-view="calibration">Calibration</button>
     <span class="navgroup">KEYS</span>
     <button class="navbtn" data-view="remap">Remap keys</button>
@@ -442,6 +443,10 @@
       <p class="hint" id="ttHint">Select a key and press it a few times - slowly is more accurate. Each press narrows the reading.</p>
       <div class="readout" id="ttNow"></div>
       <div class="readout" id="ttChecks"></div>
+    </div>
+
+    <div class="view" id="view-keytest" hidden>
+      <p class="hint">Press keys on the board above - each one lights up here while held. Good for checking rollover and dead keys.</p>
     </div>
 
     <div class="view" id="view-log" hidden><div id="log"></div></div>
@@ -1156,6 +1161,7 @@ for (const btn of document.querySelectorAll('.navbtn')) {
     saveState('');
     ledPreview(btn.dataset.view === 'light' && !!device);
     setTravelTest(btn.dataset.view === 'traveltest');
+    setKeytest(btn.dataset.view === 'keytest');
     if (btn.dataset.view !== 'calibration') {
       const arm = document.getElementById('calStart');
       arm.dataset.armed = '0';
@@ -1287,6 +1293,7 @@ function pickControlDevice(devices, anyVendor = false) {
 
 async function useDevice(d) {
   setTravelTest(false);
+  setKeytest(false);
   device = d;
   if (!device.opened) await device.open();
   // Remove first: re-enumeration and a retry after a refused device both hand back the
@@ -1335,6 +1342,7 @@ async function useDevice(d) {
   // loading screen already made the user wait for that queue to clear once - no reason to
   // make Travel test's own reads wait behind it too if it starts turning the loop on again.
   if (!document.getElementById('view-traveltest').hidden) setTravelTest(true);
+  if (!document.getElementById('view-keytest').hidden) setKeytest(true);
   // NOT awaited, and deliberately outside the loading screen: this is 64 reads, more than
   // everything above put together, for something purely cosmetic (the RT tag on a keycap
   // nobody has looked at yet) - not worth another 2+ seconds of blocked interaction for.
@@ -1429,6 +1437,7 @@ document.getElementById('connectAny').onclick = () => connect(true);
 // to be talking to the wrong thing - so the two paths cannot drift apart.
 function resetDevice(msg) {
   setTravelTest(false);
+  setKeytest(false);
   stopConfigPoll();
   setConnecting(false); // in case the device vanished mid-connect, loading screen still up
   calibrating = false;
@@ -1983,6 +1992,43 @@ function setTravelTest(on) {
     travelLoop();
   } else {
     log('Travel test stopped.');
+  }
+}
+
+// ---- Key test area ---------------------------------------------------------------
+// Purely a read loop, same KeyStatus command Travel test's own gauge already relies on -
+// this just paints every key on the board instead of tracking one.
+let keytestRunning = false;
+function clearKeytestPaint() {
+  for (const el of keyEl.values()) el.classList.remove('ktdown');
+}
+async function keytestLoop() {
+  while (keytestRunning) {
+    if (device && !writing) {
+      for (const row of KB_ROWS) {
+        if (!keytestRunning) break;
+        const ks = await getAxisRow(AXIS_MODE.KeyStatus, row, 300, true);
+        if (!ks) continue;
+        for (const [rc] of KEY_LAYOUT) {
+          const [r, c] = rcOf(rc);
+          if (r === row) keyEl.get(rc)?.classList.toggle('ktdown', ks.data[c] !== 0);
+        }
+      }
+    } else {
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+  clearKeytestPaint();
+}
+function setKeytest(on) {
+  if (on === keytestRunning) return;
+  keytestRunning = on;
+  if (on) {
+    if (!device) { log('Key test: not connected.'); keytestRunning = false; return; }
+    log('Key test started.');
+    keytestLoop();
+  } else {
+    log('Key test stopped.');
   }
 }
 
