@@ -147,10 +147,10 @@
   #kbEmpty .kbicon { font-size: 64px; line-height: 1; color: var(--ink); opacity: .45; }
   /* Deliberately quiet: the filtered picker is right for almost everyone, and the
      handshake still has to pass either way, so this is an escape hatch, not a choice. */
-  #connectAny { background: none; border: none; box-shadow: none; padding: 2px; font-size: 15px;
+  #connectAny, .linklike { background: none; border: none; box-shadow: none; padding: 2px; font-size: 15px;
                 color: var(--muted); text-decoration: underline; }
-  #connectAny:hover { background: none; color: var(--ink); }
-  #connectAny:active { transform: none; }
+  #connectAny:hover, .linklike:hover { background: none; color: var(--ink); }
+  #connectAny:active, .linklike:active { transform: none; }
   #kbTools { display: flex; justify-content: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
   /* The keycaps used to be the same cream as the panel behind them, so the whole board
      melted into the background. Caps are now lighter than the panel and the bezel is
@@ -476,6 +476,7 @@
     </div>
 
     <div class="view" id="view-remap" hidden>
+      <p class="hint">System type (Windows/Mac): switch it from the Functions tab below by dragging "Windows layout" or "Mac layout" onto any key, then pressing that key once. <button id="systemTypeProbe" class="linklike">Check raw status (log only)</button></p>
       <div class="tabs">
         <button class="tab active" data-tab="rk">Keys</button>
         <button class="tab" data-tab="rf">Functions (Fn +)</button>
@@ -705,7 +706,7 @@ const KEY_SUB = { GetRow: 1, SetRow: 2, GetCode: 3, SetCode: 4, Style: 5, Defaul
 const MACRO_SUB = { GetMode: 1, SetMode: 2, GetData: 3, SetData: 4 };
 // The firmware itself caps a macro step's delay here - the vendor bundle throws above it.
 const MACRO_DELAY_MAX = 32767;
-const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5, CalibrationSetting: 6, ShakeOptimizationSwitch: 16 };
+const GLOBAL_SUB = { ConfigSwitch: 3, ReportRateSetting: 5, CalibrationSetting: 6, ShakeOptimizationSwitch: 16, SystemSetting: 4 };
 // ConfigSwitch's third byte is NOT the QR enum the other commands use: 0/1/2 line up
 // with ReadList/Read/Write, but 3 and 4 are name get/set, which QR has no values for.
 const CFG_OP = { List: 0, Read: 1, Switch: 2, GetName: 3, SetName: 4 };
@@ -1633,6 +1634,21 @@ async function readRate() {
   return !!res;
 }
 document.getElementById('getRate').onclick = readRate;
+
+// System type (Windows/Mac) switching already works today via SPECIAL_CODES
+// (61953/61954, "Windows layout"/"Mac layout") bound onto any key through the normal
+// Functions tab remap flow - no new write packet needed for that. What IS unconfirmed is
+// SystemSetting's own read/write byte shape, so this only reads and logs raw bytes -
+// never trusted into any UI state - until a real system switch (done through the already-
+// working remap path) proves what actually changes and where.
+async function probeSystemSetting() {
+  const a = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.SystemSetting, QR.Read], 800, true);
+  if (a) { log('SystemSetting probe [2,4,1] raw: [' + Array.from(a.slice(0, 10)).join(',') + ']'); return a; }
+  const b = await sendAndWait([CATEGORY.Global, GLOBAL_SUB.SystemSetting, 0], 800, true);
+  log(b ? 'SystemSetting probe [2,4,0] raw: [' + Array.from(b.slice(0, 10)).join(',') + ']' : 'SystemSetting: neither probe answered.');
+  return b;
+}
+document.getElementById('systemTypeProbe').onclick = () => probeSystemSetting();
 
 document.getElementById('setRate').onclick = async () => {
   const rate = rateSel;
@@ -4026,6 +4042,9 @@ if (location.search.includes('selftest')) {
   console.assert(encodeConfigName('Gaming').length === 6, 'a short ascii name is not trimmed');
   console.assert(encodeConfigName('x'.repeat(40)).length === 32, 'an over-long name is trimmed to fit 32 bytes');
   console.assert(new TextDecoder().decode(encodeConfigName('日本語'.repeat(20))).length > 0, 'trimming a multibyte name never splits a character in half');
+
+  console.assert(SPECIAL_BY_CODE.get(61953)?.name.includes('Windows'), 'System type hint assumes this special code exists');
+  console.assert(SPECIAL_BY_CODE.get(61954)?.name.includes('Mac'), 'System type hint assumes this special code exists');
 
   console.log('selftest done');
 }
