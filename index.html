@@ -216,6 +216,15 @@
   .mark.live { color: var(--surface); }
   .mark.live span { color: var(--muted); }
 
+  /* DKS timeline: one shared horizontal track, multiple points draggable on the same
+     0..travel axis - matching the vendor's own DKS screen, unlike the per-stage sliders
+     MPT/MT/TGL/END still use. */
+  .dks-track { position: relative; height: 8px; margin: 30px 30px 40px; background: #FFF6E6; border: 2px solid var(--ink); }
+  .dks-marker { position: absolute; top: -26px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; cursor: ew-resize; touch-action: none; }
+  .dks-marker::after { content: ''; position: absolute; top: 26px; left: 50%; width: 3px; height: 34px; background: var(--accent); transform: translateX(-50%); pointer-events: none; }
+  .dks-tag { font-size: 13px; color: var(--muted); white-space: nowrap; margin-bottom: 2px; }
+  .dks-marker input[type=number] { width: 58px; text-align: center; padding: 3px 4px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 14px; box-sizing: border-box; }
+
   .field { margin-bottom: 11px; }
   .field label { display: block; font-size: 17px; color: var(--muted); margin-bottom: 3px; }
   .field input, .field select { width: 100%; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; }
@@ -3857,6 +3866,76 @@ function numCtl(min, max, step, value, disabled, onChange) {
   return wrap;
 }
 
+// Pointer X (px, relative to the track) -> mm, clamped to [0, travel]. Pure so it can be
+// tested without a real pointer event.
+function dksPosToMm(offsetX, trackWidth, travel) {
+  const frac = trackWidth > 0 ? offsetX / trackWidth : 0;
+  return Math.max(0, Math.min(travel, frac * travel));
+}
+
+// DKS only: one shared horizontal track, 4 draggable points (Press/Bottom/Release/Lift)
+// on the same 0..travel(mm) axis for this key. No ordering is enforced between points -
+// the per-stage sliders this replaces did not enforce one either, so this keeps the same
+// behaviour, just drawn differently. Key-slot picker rows are unchanged from
+// renderHkStages, minus the per-row numCtl.
+function renderDksTimeline(el, spec, kcs, nums, disabled, travelRaw) {
+  el.innerHTML = '';
+  const travel = (travelRaw || 3400) / 1000;
+
+  spec.rows.forEach((row, i) => {
+    const line = document.createElement('div');
+    line.className = 'hkstage';
+    const label = document.createElement('span');
+    label.className = 'muted';
+    label.textContent = row.slot;
+    const btn = document.createElement('button');
+    btn.className = 'kcslot';
+    const out = document.createElement('b');
+    out.textContent = kcs[i] ? keyName(kcs[i]) : '--';
+    btn.appendChild(out);
+    btn.disabled = disabled;
+    btn.onclick = () => openKcPicker(kcs[i], `${spec.label} - ${row.slot}`, code => { kcs[i] = code; out.textContent = keyName(code); });
+    line.append(label, btn);
+    el.appendChild(line);
+  });
+
+  const track = document.createElement('div');
+  track.className = 'dks-track';
+  spec.rows.forEach((row, i) => {
+    const m = document.createElement('div');
+    m.className = 'dks-marker';
+    const tag = document.createElement('span');
+    tag.className = 'dks-tag';
+    tag.textContent = row.slot;
+    const box = document.createElement('input');
+    box.type = 'number'; box.min = 0; box.max = travel; box.step = row.num.step;
+    box.value = nums[i]; box.disabled = disabled;
+    m.append(tag, box);
+    track.appendChild(m);
+
+    const place = mm => { m.style.left = Math.max(0, Math.min(100, mm / travel * 100)) + '%'; };
+    const settle = mm => {
+      nums[i] = +Math.max(0, Math.min(travel, mm)).toFixed(2);
+      box.value = nums[i];
+      place(nums[i]);
+    };
+    place(nums[i]);
+    box.onchange = () => settle(Number(box.value) || 0);
+
+    if (!disabled) {
+      m.onpointerdown = e => {
+        e.preventDefault();
+        m.setPointerCapture(e.pointerId);
+        const move = ev => settle(dksPosToMm(ev.clientX - track.getBoundingClientRect().left, track.getBoundingClientRect().width, travel));
+        const up = () => { m.removeEventListener('pointermove', move); m.removeEventListener('pointerup', up); };
+        m.addEventListener('pointermove', move);
+        m.addEventListener('pointerup', up);
+      };
+    }
+  });
+  el.appendChild(track);
+}
+
 // One row per stage: its name, the key it currently sends (click opens the compact
 // overlay picker), and - where this type gives the stage its own number - that number
 // right beside it. Mutates kcs/nums in place and repaints just the one row/field that
@@ -3933,7 +4012,11 @@ function renderHkSingle(prefix, spec) {
   const canEdit = !!(ready && rc && !conflict);
   const slotsEl = document.getElementById(`${prefix}Slots`), numsEl = document.getElementById(`${prefix}Nums`);
   if (hkEdit) {
-    renderHkStages(slotsEl, spec, hkEdit.kcs, hkEdit.nums, !canEdit);
+    if (spec === HK_SINGLE_SPECS.dks) {
+      renderDksTimeline(slotsEl, spec, hkEdit.kcs, hkEdit.nums, !canEdit, keyTravel.get(rc));
+    } else {
+      renderHkStages(slotsEl, spec, hkEdit.kcs, hkEdit.nums, !canEdit);
+    }
     renderHkExtra(numsEl, spec, hkEdit.nums, !canEdit);
   } else {
     slotsEl.innerHTML = ''; numsEl.innerHTML = '';
@@ -4220,6 +4303,10 @@ if (location.search.includes('selftest')) {
   console.assert(eq(higherKeyWritePacket('3-1', parseHigherKey(tglPkt)), tglPkt), 'a parsed TGL binding writes back byte-for-byte');
   console.assert(eq(higherKeyWritePacket('3-1', parseHigherKey(dksPkt)), dksPkt), 'a parsed DKS binding writes back byte-for-byte');
   console.assert(eq(higherKeyWritePacket('2-5', { type: HK_TYPE.None }), [6, 2, 2, 5, 0]), 'restoring an empty key clears it');
+
+  console.assert(Math.abs(dksPosToMm(50, 100, 4) - 2) < 1e-9, 'dksPosToMm: midpoint -> half travel');
+  console.assert(dksPosToMm(-10, 100, 4) === 0, 'dksPosToMm: clamps below 0');
+  console.assert(dksPosToMm(999, 100, 4) === 4, 'dksPosToMm: clamps above travel');
 
   console.log('selftest done');
 }
