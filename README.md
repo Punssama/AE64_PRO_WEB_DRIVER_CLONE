@@ -16,9 +16,25 @@ no framework — vanilla JS and the WebHID API.
 - **Rapid Trigger** — a toggle per key selection. Off, you set one actuation point;
   on, you also get press and release sensitivity. Keys in RT mode show an `RT` tag
   on the keycap.
+- **Super Performance mode** — a Rapid Trigger toggle that unlocks 0.001mm precision on
+  the selected key(s) and sets polling rate to 8000Hz; turning it off restores both to
+  what they were before.
 - **Dead zones** — top and bottom travel the keyboard ignores.
-- **Configs** — the keyboard stores 4 independent configs; switch between them and
-  every setting follows.
+- **Advanced keys** — SOCD, Rapid Switch, DKS (multi-stage trigger points on a shared
+  draggable timeline, not per-stage sliders), MPT, Mod-Tap, Toggle, and End binds, one
+  per physical key.
+- **Anti-ghosting** — reads and toggles the firmware's shake-optimization switch (it
+  resets to ON on every power cycle, by firmware design, not a bug here).
+- **Key test area** — every physical key lights up live while held, for checking
+  rollover and dead keys.
+- **Macro editor** — record, save, list, delete, and preview macros in the browser.
+  Binding one to a physical key isn't wired yet: the firmware's keycode for "run macro N"
+  is unconfirmed.
+- **Configs** — the keyboard stores 4 independent configs; switch between them, rename
+  them, and every setting follows.
+- **Backup / restore** — export everything this tool can read (performance, keymaps,
+  advanced keys, lighting, polling rate) to a JSON file, and restore it back with a
+  read-back verification pass.
 - **Travel test** — proves a key really fires where you configured it. Reads the
   firmware's own actuation state alongside live travel, catches the switching edges and
   compares them against your settings. Each press narrows the reading, so it converges

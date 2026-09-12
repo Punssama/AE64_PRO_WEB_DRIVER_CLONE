@@ -17,8 +17,14 @@ không thư viện, chỉ JavaScript thuần và WebHID.
 | ----------------- | ------------------------------------------------------------------------------------- |
 | **Chọn phím**     | Bấm vào bàn phím ảo để chọn, bấm lại để bỏ. Có sẵn nút WASD / Chọn tất cả / Đảo / Xoá |
 | **Rapid Trigger** | Bật/tắt cho từng phím. Tắt thì chỉnh 1 thông số, bật thì thêm 2 thông số nữa          |
+| **Super Performance mode** | Mở khoá Rapid Trigger xuống 0.001mm cho (các) phím đang chọn và tự đặt polling rate 8000Hz; tắt đi thì trả lại đúng 2 giá trị đó như trước |
 | **Vùng chết**     | Phần hành trình phím mà bàn phím bỏ qua ở đầu và cuối                                 |
-| **Config**        | Bàn phím lưu sẵn 4 hồ sơ, chuyển qua lại được, mỗi hồ sơ có thông số riêng            |
+| **Advanced keys** | SOCD, Rapid Switch, DKS (nhiều điểm kích hoạt trên 1 timeline kéo-thả chung, không phải slider riêng từng điểm), MPT, Mod-Tap, Toggle, End — mỗi phím vật lý 1 tính năng |
+| **Anti-ghosting** | Đọc/bật-tắt công tắc chống dội phím của firmware (tự bật lại sau mỗi lần cắm điện, đúng thiết kế của firmware, không phải lỗi) |
+| **Key test area** | Mỗi phím vật lý sáng lên ngay khi giữ, để kiểm tra rollover và phím chết             |
+| **Macro editor**  | Ghi âm, lưu, xem danh sách, xoá, và xem trước macro ngay trên trình duyệt. Gán macro vào 1 phím thật thì chưa nối được — mã "chạy macro N" mà firmware cần chưa xác nhận được |
+| **Config**        | Bàn phím lưu sẵn 4 hồ sơ, chuyển qua lại được, đổi tên được, mỗi hồ sơ có thông số riêng |
+| **Backup / restore** | Xuất mọi thứ tool này đọc được (thông số, keymap, advanced keys, đèn, polling rate) ra file JSON, và nạp lại được, có đọc lại để đối chiếu |
 | **Travel test**   | **Kiểm chứng** phím có thật sự kích hoạt đúng độ sâu bạn đặt hay không                |
 | **Calibration**   | Bắt bàn phím học lại điểm trên/dưới của từng switch                                   |
 | **Polling rate**  | 125 Hz đến 8000 Hz                                                                    |
