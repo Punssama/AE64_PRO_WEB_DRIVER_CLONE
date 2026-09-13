@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>toast</title>
+<style>
+  /* Bundled VT323 (the app's font), with a fallback that covers CJK profile names like 配置三
+     which VT323 itself does not include. */
+  @font-face { font-family: 'VT323'; src: url('VT323-latin.woff2') format('woff2'); unicode-range: U+0000-00FF, U+2000-206F, U+2191, U+2193; }
+  @font-face { font-family: 'VT323'; src: url('VT323-latin-ext.woff2') format('woff2'); unicode-range: U+0100-024F, U+1E00-1EFF; }
+  @font-face { font-family: 'VT323'; src: url('VT323-vietnamese.woff2') format('woff2'); unicode-range: U+0102-0103, U+0110-0111, U+1EA0-1EF9, U+20AB; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; -webkit-user-select: none; }
+  /* One amber-bordered card in the app's palette: dark board, amber accent, hard offset shadow. */
+  #card {
+    box-sizing: border-box; width: 234px; margin: 8px;
+    background: #12352B; border: 2px solid #FFC94D; box-shadow: 4px 4px 0 rgba(0,0,0,.45);
+    padding: 8px 14px; opacity: 0;
+    font-family: 'VT323', 'Segoe UI', system-ui, sans-serif;
+  }
+  #card.show { animation: toast 1.7s ease-in-out forwards; }
+  @keyframes toast { 0% { opacity: 0; transform: translateY(6px); } 10%,80% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  #label { font-size: 13px; letter-spacing: .12em; color: #FFC94D; opacity: .85; }
+  #name { font-size: 30px; line-height: 1.05; color: #FAE7CB; word-break: break-word; }
+</style>
+<div id="card"><div id="label">PROFILE</div><div id="name"></div></div>
+<script>
+  const card = document.getElementById('card');
+  // Called from the main process each time the toast is shown.
+  window.setMessage = (name, label = 'PROFILE') => {
+    document.getElementById('label').textContent = label;
+    document.getElementById('name').textContent = name;
+    card.classList.remove('show');
+    void card.offsetWidth;            // restart the animation from the top
+    card.classList.add('show');
+  };
+</script>

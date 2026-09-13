@@ -14,6 +14,13 @@ one `index.html`; both the web build and this desktop build follow.
 - **Offline.** VT323 is bundled; nothing is fetched from the network.
 - **Reconnect.** HID permission is granted for the keyboard's vendor, so the tool reconnects
   by itself after a polling-rate change or a replug, same as the web build.
+- **System tray.** The tray icon's tooltip and menu show the active profile. Closing the
+  window keeps the app running in the tray (Quit is on the tray menu); clicking the tray
+  reopens it.
+- **Profile toast.** When the active profile changes - from the on-screen picker or the
+  keyboard's own profile key - a small always-on-top, click-through popup shows the new
+  profile name, then fades. `preload.js` watches the CONFIG dropdown for this; the page
+  itself is unchanged.
 
 Everything else - the protocol, every read and write - is the shared `index.html`, unchanged.
 
