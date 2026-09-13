@@ -1883,7 +1883,12 @@ async function switchConfig(id) {
 // Same cleanup either way: a debounced write already pending belongs to the config being
 // left, and everything per-key on screen belongs to it too.
 async function onConfigChangedExternally(id) {
-  if (id === currentConfig) return;
+  // currentConfig is null between a disconnect and loadConfigs() reading it back - and HID
+  // replies reach every page holding the board, so another open tab's config poll lands
+  // here in that window. That is not a change: this page just does not know yet, and
+  // loadConfigs() is about to find out. (Seen on the board with a second tab connected:
+  // "Config 1 -> Config 2" plus a redundant 64-key rescan on every reconnect.)
+  if (!device || currentConfig === null || id === currentConfig) return;
   clearTimeout(writeTimer);
   writeAgain = false;
   log(`Config changed on the keyboard itself (hardware profile key?): ${configLabel(currentConfig)} -> ${configLabel(id)}`);
