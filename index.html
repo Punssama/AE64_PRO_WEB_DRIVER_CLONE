@@ -1711,8 +1711,13 @@ async function sendAndWaitRaw(bytes, timeout = 1000, quiet = false) {
     waiters.push(w);
   });
   try {
-    if (!device.opened) await device.open();
-    await device.sendReport(0, payload);
+    // Bounded by this request's own reply-or-timeout, never awaited bare: a sendReport() still
+    // pending when the device closes (unplugged, re-enumerating after a polling-rate change)
+    // never settles in Chrome - neither resolves nor rejects, checked on the real board. One
+    // stranded write parked the whole serial queue behind it, so every later command hung
+    // and reconnecting did nothing until the page was reloaded.
+    if (!device.opened) await Promise.race([device.open(), p]);
+    await Promise.race([device.sendReport(0, payload), p]);
   } catch (err) {
     // Still sits out the timeout rather than failing at once: that wait is the only thing
     // pacing the polling loops while the keyboard re-enumerates, or they would spin here.
@@ -1733,6 +1738,9 @@ function resetDevice(msg) {
   setTravelTest(false);
   setKeytest(false);
   stopConfigPoll();
+  // Requests still waiting belong to a device that is gone: answer them now (null) rather than
+  // after their timeouts, so the serial queue is empty by the time anyone reconnects.
+  for (const w of [...waiters]) settleWaiter(w, null);
   setConnecting(false); // in case the device vanished mid-connect, loading screen still up
   calibrating = false;
   document.getElementById('backupSave').disabled = true;
