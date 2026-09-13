@@ -1,0 +1,35 @@
+{
+  "name": "ae64-pro-tuner-desktop",
+  "productName": "AE64 Pro Tuner",
+  "version": "1.0.0",
+  "description": "Desktop build of the AE64 Pro Hall-effect keyboard tuner - the web tool wrapped in Electron so it runs without a browser.",
+  "author": "Punssama",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "prep": "node build-html.mjs",
+    "start": "npm run prep && electron .",
+    "dist": "npm run prep && electron-builder --win nsis",
+    "dir": "npm run prep && electron-builder --win dir"
+  },
+  "devDependencies": {
+    "electron": "^32.2.7",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "io.github.punssama.ae64protuner",
+    "productName": "AE64 Pro Tuner",
+    "files": ["main.js", "app/**/*", "assets/icon.ico"],
+    "directories": { "output": "dist" },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "AE64-Pro-Tuner-Setup-${version}.${ext}"
+    }
+  }
+}

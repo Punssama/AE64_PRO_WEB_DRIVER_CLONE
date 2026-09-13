@@ -67,6 +67,19 @@ lọc thiết bị trong console.
 **Trình duyệt:** WebHID có trên Chrome, Edge và các trình duyệt nhân Chromium.
 Firefox và Safari **không** hỗ trợ.
 
+## Bản desktop (Windows)
+
+Muốn một app riêng — không cần trình duyệt, chạy offline, kết nối không hiện hộp chọn
+thiết bị? Tải bộ cài ở trang [**Releases**](https://github.com/Punssama/AE64_PRO_WEB_DRIVER_CLONE/releases)
+(`AE64-Pro-Tuner-Setup-<phiên bản>.exe`). Đây là cùng công cụ này gói trong Electron;
+giao thức y hệt bản web.
+
+App **chưa ký số**, nên lần đầu chạy Windows SmartScreen sẽ báo "Windows protected your
+PC" — bấm **More info → Run anyway**.
+
+Mã nguồn bản desktop nằm ở [`desktop/`](desktop/); chạy `cd desktop && npm install && npm run dist`
+để build lại bộ cài. Nó dùng chung đúng file `index.html` này, nên chỉ có một nguồn duy nhất.
+
 ## Cảnh báo an toàn
 
 Công cụ này ghi thẳng vào cấu hình trong firmware bàn phím. Vài điều nó làm để không

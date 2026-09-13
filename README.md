@@ -87,6 +87,19 @@ assertions in the console.
 **Browser support:** WebHID ships in Chrome, Edge and other Chromium browsers.
 Firefox and Safari do not implement it.
 
+## Desktop app (Windows)
+
+Prefer a standalone program - no browser, works offline, connects with no device
+picker? Grab the installer from the [**Releases**](https://github.com/Punssama/AE64_PRO_WEB_DRIVER_CLONE/releases)
+page (`AE64-Pro-Tuner-Setup-<version>.exe`). It is the same tuner wrapped in Electron;
+the protocol is identical to the web build.
+
+It is **not code signed**, so on first run Windows SmartScreen shows "Windows protected
+your PC" - click **More info -> Run anyway**.
+
+The desktop project lives in [`desktop/`](desktop/); `cd desktop && npm install && npm run dist`
+rebuilds the installer. It reuses this same `index.html`, so there is one source of truth.
+
 ## Safety
 
 This writes to your keyboard's firmware settings. A few things the tool does to avoid

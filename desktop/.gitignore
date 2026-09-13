@@ -1,0 +1,6 @@
+# Electron + build tooling
+node_modules/
+# Installer output
+dist/
+# Generated at build time from ../index.html by build-html.mjs
+app/
