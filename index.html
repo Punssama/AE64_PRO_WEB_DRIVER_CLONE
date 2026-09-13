@@ -3238,7 +3238,8 @@ document.getElementById('build').textContent = 'build ' + document.lastModified.
 // at all. Say so, instead of failing later with "cannot read properties of undefined".
 if (!navigator.hid) {
   document.querySelector('#kbEmpty p').textContent =
-    'This browser has no WebHID. Open the page in Chrome or Edge.';
+    // "Chrome" alone sent phone users in circles: Chrome on Android has no WebHID either.
+    'This browser has no WebHID. Open the page in Chrome or Edge on a computer.';
   document.getElementById('connect').disabled = true;
   document.getElementById('connectAny').hidden = true;
 }
@@ -3838,10 +3839,78 @@ async function verifyRestore(before) {
   return diffs;
 }
 
+// A backup file is outside input: shared around, hand-edited, cut short. Restore writes it
+// straight into the keyboard, and this firmware clamps nothing - a 3.8mm dead zone on a
+// 3.39mm switch made keys chatter, lighting stores 200% as readily as 100%. So every field
+// is checked against what the keyboard can actually take before Restore is offered, and
+// restoreBackup() checks again before sending a byte. Returns what is wrong, [] when nothing.
+function validateBackup(d) {
+  if (d?.tool !== 'ae64-pro-tuner') return ['not a backup made by this tool'];
+  const bad = [];
+  const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+  const keys = new Set(KEY_LAYOUT.map(([rc]) => rc));
+  // 3.4mm is the whole travel of this switch (3.31-3.39mm measured): no depth, dead zone or
+  // sensitivity can go past it, and the chatter came from exactly such a value.
+  const MAX_MM = 3.4;
+  for (const [rc, p] of Object.entries(d.perf || {})) {
+    if (!keys.has(rc)) { bad.push(`performance: ${rc} is not a key`); continue; }
+    if (p == null) continue;
+    if (!isInt(p.mode, 0, 1)) bad.push(`performance ${rc}: mode ${p.mode}`);
+    for (const k of PERF_SETTINGS.slice(1)) {
+      if (!(Number.isFinite(p[k]) && p[k] >= 0 && p[k] <= MAX_MM)) bad.push(`performance ${rc}: ${k} ${p[k]} (0-${MAX_MM}mm)`);
+    }
+  }
+  for (const layer of ['0', '1']) {
+    const rows = d.keymap?.[layer];
+    if (rows == null) continue;
+    if (!Array.isArray(rows) || rows.length !== 6 || rows.some(r => !Array.isArray(r) || r.length !== 21 || r.some(c => !isInt(c, 0, 0xffff)))) {
+      bad.push(`keymap layer ${layer}: not 6 rows of 21 key codes`);
+    }
+  }
+  // Field by field, in parseHigherKey()'s own shape: stage depths (dbs) are mm, DKS trigger
+  // points (trps) single bytes, a pair's partner a real key with the UI's delay cap, and
+  // every other number (key codes, times, delays) has to fit the 16 bits it is sent in.
+  const HK_FIELD = { [HK_TYPE.DKS]: 'dks', [HK_TYPE.MPT]: 'mpt', [HK_TYPE.MT]: 'mt', [HK_TYPE.TGL]: 'tgl', [HK_TYPE.END]: 'end', [HK_TYPE.SOCD]: 'socd', [HK_TYPE.RS]: 'rs' };
+  for (const [rc, hk] of Object.entries(d.adv || {})) {
+    if (!keys.has(rc) || !hk || !Object.values(HK_TYPE).includes(hk.type)) { bad.push(`advanced key ${rc}: unknown binding`); continue; }
+    if (hk.type === HK_TYPE.None) continue;
+    const f = hk[HK_FIELD[hk.type]];
+    const leafOk = (k, v) => k === 'dbs' ? v.every(x => Number.isFinite(x) && x >= 0 && x <= MAX_MM)
+      : k === 'trps' ? v.every(x => isInt(x, 0, 255))
+      : Array.isArray(v) ? v.every(x => isInt(x, 0, 0xffff))
+      : isInt(v, 0, 0xffff);
+    const pairOk = !(hk.socd || hk.rs) || (keys.has(`${f.row2}-${f.col2}`) && isInt(f.delay, 0, SOCD_DELAY_MAX) && (!hk.socd || isInt(f.sByte, 0, 3)));
+    if (!f || typeof f !== 'object' || !pairOk || !Object.entries(f).every(([k, v]) => leafOk(k, v))) bad.push(`advanced key ${rc}: a value is out of range`);
+  }
+  for (const [area, entry] of Object.entries(d.lighting?.areas || {})) {
+    const s = entry?.state;
+    if (!s) continue;
+    const a = Number(area);
+    if (!lightAreas.includes(a)) { bad.push(`lighting: this keyboard has no area ${area}`); continue; }
+    const maxOpen = a === AREA.Keyboard && dualLighting ? LIGHT_OPEN.Open : 1;
+    if (!isInt(s.open, 0, maxOpen) || !isInt(s.mode, 0, modeCount(a) - 1) || !isInt(s.luminance, 0, LIGHT_PCT_MAX)
+        || !isInt(s.speed, 0, LIGHT_PCT_MAX) || !isInt(s.direction, 0, 1) || !isInt(s.colorIdx, 0, 7)) {
+      bad.push(`lighting area ${area}: a value is out of range`);
+    }
+  }
+  if (d.lighting?.custom != null) {
+    const ok = Array.isArray(d.lighting.custom) && d.lighting.custom.every(e => Array.isArray(e) && keys.has(e[0]) && e[1] && ['r', 'g', 'b'].every(k => isInt(e[1][k], 0, 255)));
+    if (!ok) bad.push('custom key colours: a bad entry');
+  }
+  if (d.rate != null && !isInt(d.rate, 0, RATES.length - 1)) bad.push(`polling rate: ${d.rate}`);
+  return bad;
+}
+
 // Palette has no confirmed write packet anywhere in the vendor bundle (captured in
 // buildBackup for reference only), so it cannot be replayed here - documented gap, not
 // guessed at.
 async function restoreBackup(data) {
+  const problems = validateBackup(data);
+  if (problems.length) {
+    log('Restore refused - ' + problems.slice(0, 10).join('; '));
+    saveState('Restore refused: invalid file', true);
+    return;
+  }
   saveState('Restoring...', true);
   // `same` counts values the keyboard already holds: nothing is sent for those, since every
   // write lands in the keyboard's storage and rewriting an identical value buys nothing.
@@ -3931,11 +4000,15 @@ document.getElementById('backupFile').onchange = async e => {
   if (!file) return;
   try {
     backupData = JSON.parse(await file.text());
-    const good = backupData?.tool === 'ae64-pro-tuner';
+    // Ranges depend on the connected board (its light areas, effect counts), so a file picked
+    // while disconnected is checked again by restoreBackup() once there is a board to check against.
+    const problems = validateBackup(backupData);
+    const good = !problems.length;
     document.getElementById('backupRestore').disabled = !device || !good;
     document.getElementById('backupRestoreState').textContent = good
       ? `Loaded: ${backupData.configName || ''}, saved ${backupData.savedAt || 'unknown time'}.`
-      : 'Not a recognised backup file.';
+      : `Not restoring this file - ${problems.length} problem${problems.length === 1 ? '' : 's'}: ${problems.slice(0, 3).join('; ')}${problems.length > 3 ? '; ...' : ''}`;
+    if (!good) log('Backup file rejected - ' + problems.slice(0, 10).join('; '));
   } catch (err) {
     backupData = null;
     document.getElementById('backupRestoreState').textContent = 'Could not read that file: ' + err.message;
@@ -5025,6 +5098,22 @@ if (location.search.includes('selftest')) {
   // A restore skips keys whose PERF_SETTINGS already match - a field readCfg() writes but this
   // list misses would make that skip leave a wrong value in place.
   console.assert(eq(Object.keys(readCfg()).sort(), [...PERF_SETTINGS].sort()), 'PERF_SETTINGS lists exactly the fields a performance write sets');
+  {
+    // Backup files are outside input: a clean file passes, and each kind of bad value is caught.
+    const perf = { mode: 0, normalPress: 2.5, normalRelease: 2.5, rtFirstTouch: 0.3, rtPress: 0.2, rtRelease: 0.2, pressDeadStroke: 0.2, releaseDeadStroke: 0.2, axis: 0, calibrate: 1, axisV2Id: 12432, axisRangeMax: 3310, axisCoefficient: 20500 };
+    const rows = Array.from({ length: 6 }, () => new Array(21).fill(4));
+    const ok = { tool: 'ae64-pro-tuner', rate: 0, perf: { '3-1': perf }, keymap: { 0: rows, 1: rows }, adv: { '3-1': parseHigherKey(tglPkt) }, lighting: { areas: {}, custom: [['3-1', { r: 1, g: 2, b: 3 }]] } };
+    console.assert(eq(validateBackup(ok), []), 'a clean backup validates');
+    const broken = patch => validateBackup({ ...ok, ...patch }).length > 0;
+    console.assert(validateBackup({ tool: 'something-else' }).length === 1, 'a foreign JSON file is refused');
+    console.assert(broken({ perf: { '3-1': { ...perf, releaseDeadStroke: 3.8 } } }), 'a dead zone past the switch travel is refused');
+    console.assert(broken({ perf: { '3-1': { ...perf, normalPress: 'x' } } }), 'a non-number depth is refused');
+    console.assert(broken({ perf: { '9-9': perf } }), 'a key that does not exist is refused');
+    console.assert(broken({ keymap: { 0: rows.slice(1), 1: rows } }), 'a short keymap is refused');
+    console.assert(broken({ adv: { '3-1': { ...parseHigherKey(tglPkt), tgl: { kc: 70000, time: 0 } } } }), 'a key code past 16 bits is refused');
+    console.assert(broken({ rate: 9 }), 'an unknown polling rate is refused');
+    console.assert(broken({ lighting: { areas: {}, custom: [['3-1', { r: 300, g: 0, b: 0 }]] } }), 'a colour channel past 255 is refused');
+  }
 
   {
     // The dark palette has to reach the elements, not just exist: flip the attribute and
