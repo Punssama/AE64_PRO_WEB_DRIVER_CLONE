@@ -1671,11 +1671,20 @@ async function connect(anyVendor = false) {
 
 // Some settings (e.g. polling rate) make the keyboard briefly re-enumerate over USB -
 // that's expected, not a fault. Auto-reopen instead of leaving the tool stuck.
+// The board this page was connected to when it dropped off USB. A polling-rate change makes
+// it re-enumerate - both interfaces disconnect, then connect again ~0.6-0.9s later (measured).
+// The disconnect handler below resets `device` first, so a handler keyed on `device` never
+// matched the reconnect and the tool sat at "Not connected" after every Apply rate.
+let lostDevice = null;
 navigator.hid?.addEventListener('connect', async ({ device: d }) => {
-  if (device && d.vendorId === device.vendorId && d.productId === device.productId) {
-    log('Device re-enumerated, reconnecting...');
-    await useDevice(d);
-  }
+  const was = device || lostDevice;
+  if (!was || d.vendorId !== was.vendorId || d.productId !== was.productId) return;
+  if (device?.opened) return;
+  // Both interfaces announce themselves; only the one with an output report is the control channel.
+  if (!d.collections.some(c => c.outputReports?.length)) return;
+  lostDevice = null;
+  log('Device re-enumerated, reconnecting...');
+  await useDevice(d);
 });
 
 // Replies are matched by their echoed header now (see `onInputReport`), so a stray report
@@ -1767,6 +1776,7 @@ function resetDevice(msg) {
 // Unplugging left the board on screen looking live, and every poll silently timing out.
 navigator.hid?.addEventListener('disconnect', ({ device: d }) => {
   if (!device || d.vendorId !== device.vendorId || d.productId !== device.productId) return;
+  lostDevice = device; // so the same board coming back (re-enumeration, replug) reconnects by itself
   resetDevice('Keyboard disconnected.');
 });
 
