@@ -251,8 +251,12 @@
   #kb.lit.dual.led-up:not(.led-down) .kb-key .cap,
   #kb.lit.dual.led-down:not(.led-up) .kb-key .cap { color: #fff; text-shadow: 1px 0 #000, -1px 0 #000, 0 1px #000, 0 -1px #000; }
   #kb.lit.dual:not(.led-up):not(.led-down) .kb-key .cap { color: var(--legend-unlit); text-shadow: none; }
-  #kb .kb-key:hover { background: var(--accent); color: var(--on-accent); }
-  #kb .kb-key.selected, #kb .kb-key.ktdown { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--on-accent); }
+  /* Hover and the selected highlight only where the board is for picking keys (.nointeract
+     is set on views that don't act on a picked key). .ktdown stays unscoped: Key test is
+     one of those views, and lighting the key you physically press is the whole point there. */
+  #kb:not(.nointeract) .kb-key:hover { background: var(--accent); color: var(--on-accent); }
+  #kb:not(.nointeract) .kb-key.selected, #kb .kb-key.ktdown { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--on-accent); }
+  #kb.nointeract .kb-key { cursor: default; }
   /* An inked chip, so it stays legible on a cream key and on a selected amber one. */
   #kb .kb-key .tag { display: none; position: absolute; top: 0; right: 0; padding: 0 2px; font-size: 13px; line-height: 1.15; background: var(--sel-bg); color: var(--sel-fg); }
   #kb .kb-key.rt .tag { display: block; }
@@ -1104,12 +1108,18 @@ function renderKeyboard() {
 
 async function toggleKey(row, col) {
   const rc = `${row}-${col}`;
-  // Paint mode is a different tool entirely - a click here is "set this key's colour
-  // now", not "select this key" - so it short-circuits before the selection model below
-  // even sees it, the same way it never touches `selected` at all.
-  if (customPaint && !document.getElementById('view-light').hidden) {
-    if (!customLoaded) await loadCustomColors();
-    paintCustomKey(rc, document.getElementById('customBrush').value);
+  // Views that don't act on a picked key make the board display-only (see updateKbForView):
+  // Key test lights the keys you physically press; Polling rate / Backup / Calibration /
+  // Macros / Log need no key picked. A click there should do nothing, not build a hidden
+  // selection.
+  if (document.getElementById('kb').classList.contains('nointeract')) return;
+  // Lighting only ever paints: with the brush on a click sets that key's colour, and with
+  // it off a click does nothing - selecting keys means nothing on this view.
+  if (!document.getElementById('view-light').hidden) {
+    if (customPaint) {
+      if (!customLoaded) await loadCustomColors();
+      paintCustomKey(rc, document.getElementById('customBrush').value);
+    }
     return;
   }
   if (selected.has(rc)) { selected.delete(rc); updateSelectionUI(); return; }
@@ -1394,10 +1404,25 @@ for (const id of ACTUATION_FIELDS) {
 }
 
 // Sidebar swaps the lower panel instead of stacking every section down the page.
+// The virtual keyboard is a key PICKER only where a view acts on the key you pick:
+// Settings (tune), Travel test / Remap (one key), Advanced keys (bind), Lighting (paint
+// custom colours). On every other view it is display-only - clicks do nothing and the
+// hover/selection highlight is suppressed (see the .nointeract CSS + toggleKey).
+const INTERACTIVE_VIEWS = new Set(['performance', 'traveltest', 'remap', 'adv', 'light']);
+function updateKbForView(view) {
+  document.getElementById('kb').classList.toggle('nointeract', !INTERACTIVE_VIEWS.has(view));
+  // Travel test watches one key and Remap targets one, so a multi-select carried in from
+  // Settings would light several keys while only the first is in play. Collapse to it.
+  if ((view === 'traveltest' || view === 'remap') && selected.size > 1) {
+    setSelection([selected.values().next().value]);
+  }
+}
+
 for (const btn of document.querySelectorAll('.navbtn')) {
   btn.onclick = () => {
     for (const b of document.querySelectorAll('.navbtn')) b.classList.toggle('active', b === btn);
     for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== 'view-' + btn.dataset.view;
+    updateKbForView(btn.dataset.view);
     document.getElementById('viewTitle').textContent =
       btn.dataset.view === 'performance' ? 'Trigger settings' : btn.textContent;
     // Polling only runs while its view is on screen: a loop left running competes with
@@ -1440,6 +1465,7 @@ for (const btn of document.querySelectorAll('.navbtn')) {
   };
 }
 document.querySelector('.navbtn').classList.add('active');
+updateKbForView('performance');   // the default view
 
 // Every per-key control needs a target; with nothing selected they would write nowhere.
 const NEEDS_KEY = [...SLIDER_FIELDS, ...SLIDER_FIELDS.map(id => id + '_r')];
@@ -5148,6 +5174,15 @@ if (location.search.includes('selftest')) {
     const dark = getComputedStyle(document.body).color;
     root.dataset.theme = was;
     console.assert(light !== dark, 'dark theme changes the ink colour, not just a variable nobody reads');
+  }
+  {
+    // The board is a key picker only where a view acts on the picked key; the display-only
+    // views must not be in the set, or clicks there would build a hidden selection again.
+    updateKbForView('keytest');
+    console.assert(document.getElementById('kb').classList.contains('nointeract'), 'Key test does not let you pick keys');
+    for (const v of ['rate', 'backup', 'log', 'calibration', 'macro']) { updateKbForView(v); console.assert(document.getElementById('kb').classList.contains('nointeract'), v + ' does not let you pick keys'); }
+    for (const v of ['performance', 'traveltest', 'remap', 'adv', 'light']) { updateKbForView(v); console.assert(!document.getElementById('kb').classList.contains('nointeract'), v + ' is a key picker'); }
+    updateKbForView('performance');
   }
 
   console.log('selftest done');
