@@ -21,6 +21,11 @@ no framework — vanilla JS and the WebHID API.
 - **Dead zones** — top and bottom travel the keyboard ignores.
 - **Advanced keys** — SOCD, Rapid Switch, MPT, Mod-Tap, Toggle, and End binds, one per
   physical key. DKS is switched off while its editor is being redesigned.
+- **Magnetic Switch picker** — tag each key with the physical Hall-effect switch installed in
+  it, from an offline English list (name, actuation force, total travel). The vendor's own switch
+  catalog is login-walled, so this list is compiled from public spec sheets; every number is
+  sourced. Labels are saved in your browser only — never written to the keyboard — and are shared
+  across all 4 configs, since a switch is physical.
 - **Anti-ghosting** — reads and toggles the firmware's shake-optimization switch (it
   resets to ON on every power cycle, by firmware design, not a bug here).
 - **Key test area** — every physical key lights up live while held, for checking

@@ -19,6 +19,7 @@ không thư viện, chỉ JavaScript thuần và WebHID.
 | **Rapid Trigger** | Bật/tắt cho từng phím. Tắt thì chỉnh 1 thông số, bật thì thêm 2 thông số nữa. Chỉnh được xuống mức nhỏ nhất bàn phím cho phép (0.001mm với bàn này); dưới 0.1mm thì số chuyển đỏ, cả ở ô nhập lẫn tag `RT` trên phím, vì nông vậy switch có thể kích hoạt thất thường |
 | **Vùng chết**     | Phần hành trình phím mà bàn phím bỏ qua ở đầu và cuối                                 |
 | **Advanced keys** | SOCD, Rapid Switch, MPT, Mod-Tap, Toggle, End — mỗi phím vật lý 1 tính năng. DKS tạm tắt trong lúc làm lại phần chỉnh |
+| **Chọn switch (Magnetic Switch)** | Gán loại switch HE vật lý cho từng phím từ danh sách offline tiếng Anh (tên, lực nhấn, hành trình). List switch của hãng bị khoá đăng nhập nên đây là list biên soạn từ datasheet công khai, số nào cũng có nguồn. Nhãn chỉ lưu trong trình duyệt — không ghi vào bàn phím — và dùng chung cho cả 4 config vì switch là vật lý |
 | **Anti-ghosting** | Đọc/bật-tắt công tắc chống dội phím của firmware (tự bật lại sau mỗi lần cắm điện, đúng thiết kế của firmware, không phải lỗi) |
 | **Key test area** | Mỗi phím vật lý sáng lên ngay khi giữ, để kiểm tra rollover và phím chết             |
 | **Macro editor**  | Ghi âm, lưu, xem danh sách, xoá, và xem trước macro ngay trên trình duyệt. Gán macro vào 1 phím thật thì chưa nối được — mã "chạy macro N" mà firmware cần chưa xác nhận được |

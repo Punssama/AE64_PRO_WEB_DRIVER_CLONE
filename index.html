@@ -445,6 +445,19 @@
   /* Calibration rewrites every key's stored axis data, so its screen is styled to be
      read before it is clicked, not after. */
   .warn { border: 2px solid var(--line); background: var(--accent); color: var(--on-accent); padding: 3px 8px; margin: 0 0 12px; }
+  /* Switches view: a filter box over a flat 8-bit list of switch rows. */
+  #switchFilter { width: 100%; box-sizing: border-box; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 17px; margin: 0 0 10px; }
+  #switchList { display: flex; flex-direction: column; gap: 6px; }
+  .swrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; cursor: pointer; text-align: left; }
+  .swrow:hover { background: var(--accent); color: var(--on-accent); }
+  .swrow.on { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--ink); }
+  .swrow:disabled { opacity: .55; cursor: default; }
+  .swrow .spec { font-size: 14px; color: var(--muted); white-space: nowrap; }
+  .swrow:hover .spec, .swrow.on .spec { color: var(--on-accent); }
+  /* Keycap switch badge - bottom-left so it never shares the RT chip's top-right corner, and
+     only painted while the Switches view is on screen (see paintSwitchTags). */
+  #kb .kb-key .swtag { position: absolute; left: 1px; bottom: 0; font-size: 9px; line-height: 1; font-family: var(--term); color: var(--muted); pointer-events: none; }
+  #kb:not(.show-switch) .kb-key .swtag { display: none; }
   /* An action and the status it reports share a row, so the result lands where the eye
      already is instead of on a line of its own under the button. */
   .actrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -544,6 +557,7 @@
     <button class="navbtn" data-view="remap">Remap keys</button>
     <button class="navbtn" data-view="adv">Advanced keys</button>
     <button class="navbtn" data-view="macro">Macros</button>
+    <button class="navbtn" data-view="switches">Switches</button>
     <span class="navgroup">DEVICE</span>
     <button class="navbtn" data-view="light">Lighting</button>
     <button class="navbtn" data-view="rate">Polling rate</button>
@@ -849,6 +863,14 @@
       </div>
     </div>
 
+    <div class="view" id="view-switches" hidden>
+      <p class="hint">Tag each key with the physical switch installed in it. Labels are saved on
+        this computer only - nothing is written to the keyboard, and they are shared across all 4
+        configs. Pick key(s) on the board above, then a switch below.</p>
+      <input id="switchFilter" type="text" placeholder="Filter switches..." autocomplete="off">
+      <p class="hint" id="switchReadout"></p>
+      <div id="switchList"></div>
+    </div>
     <div class="view" id="view-macro" hidden>
       <div class="socd">
         <div class="socd-edit">
@@ -1090,6 +1112,7 @@ function renderKeyboard() {
       Object.assign(document.createElement('span'), { className: 'lvl' }),
       Object.assign(document.createElement('span'), { className: 'cap', textContent: label }),
       Object.assign(document.createElement('span'), { className: 'tag', textContent: 'RT' }),
+      Object.assign(document.createElement('span'), { className: 'swtag' }),
     );
     keyEl.set(rc, btn);
     keyLvlEl.set(rc, btn.children[1]); // .lvl - see the append() order above
@@ -1272,6 +1295,7 @@ function updateSelectionUI() {
     else if (tab === 'socd') renderSocd();
     else if (HK_SINGLE_SPECS[tab]) renderHkSingle(tab, HK_SINGLE_SPECS[tab]);
   }
+  if (!document.getElementById('view-switches').hidden) renderSwitchView();
 }
 
 // The gauge draws the key's real travel, read from the device (axisRangeMax).
@@ -1408,7 +1432,7 @@ for (const id of ACTUATION_FIELDS) {
 // Settings (tune), Travel test / Remap (one key), Advanced keys (bind), Lighting (paint
 // custom colours). On every other view it is display-only - clicks do nothing and the
 // hover/selection highlight is suppressed (see the .nointeract CSS + toggleKey).
-const INTERACTIVE_VIEWS = new Set(['performance', 'traveltest', 'remap', 'adv', 'light']);
+const INTERACTIVE_VIEWS = new Set(['performance', 'traveltest', 'remap', 'adv', 'light', 'switches']);
 function updateKbForView(view) {
   document.getElementById('kb').classList.toggle('nointeract', !INTERACTIVE_VIEWS.has(view));
   // Selection never carries across tabs. Left in place it lights keys the user did not pick
@@ -1445,11 +1469,14 @@ for (const btn of document.querySelectorAll('.navbtn')) {
       if (device && !advCache) loadAdvancedKeys();
     }
     if (btn.dataset.view === 'macro' && device) loadMacroList();
+    if (btn.dataset.view === 'switches') renderSwitchView();
     socdListen(btn.dataset.view === 'adv');
     // Every view, not just the others: entering remap on the FN tab has to repaint too.
     paintCaps();
     // Same rule for the advanced-key chips: drawn from the view on screen, never left over.
     paintAdvTags();
+    // Switch badges show only on the Switches view; painting every time clears them elsewhere.
+    paintSwitchTags();
     // saveState(msg, true) never times out, so a refusal from one view would sit in the
     // status bar of every other one. Leaving the view is as good as acknowledging it.
     saveState('');
@@ -1477,6 +1504,7 @@ function updateEnabled() {
 // After NEEDS_KEY exists: updateKbForView clears the selection, which runs updateEnabled.
 updateKbForView('performance');   // the default view
 
+document.getElementById('switchFilter').addEventListener('input', renderSwitchView);
 document.getElementById('selWasd').onclick = () => setSelection(['2-2', '3-1', '3-2', '3-3']);
 document.getElementById('selAll').onclick = () => setSelection(KEY_LAYOUT.map(([rc]) => rc));
 document.getElementById('selInvert').onclick = () => setSelection(KEY_LAYOUT.map(([rc]) => rc).filter(rc => !selected.has(rc)));
@@ -1967,6 +1995,45 @@ function stopConfigPoll() {
 // something a stray click should do.
 const RATES = ['8000 Hz', '4000 Hz', '2000 Hz', '1000 Hz', '500 Hz', '250 Hz', '125 Hz'];
 let rateSel = 3;
+
+// Hall-effect switch reference list, compiled OFFLINE from public spec sheets - the vendor's
+// own getAxisList catalog is login-walled (401 to an anonymous request) and this tool never
+// handles credentials. force = operating/initial force in grams; travel = total travel in mm.
+// Every number is sourced (see `source`); a value that could not be sourced would carry
+// approx:true and render with a "≈". Extend this array to add a switch - nothing else needs it.
+const SWITCHES = [
+  { id: 'ur_ice_ultra',        brand: 'UR',      name: 'Ice Ultra',           force: 35, travel: 3.5, source: 'arbiterstudio.com' },
+  { id: 'ttc_rgb_king_he',     brand: 'TTC',     name: 'RGB King HE',          force: 35, travel: 3.5, source: 'ttcswitches.com / kbd.news' },
+  { id: 'gateron_jade',        brand: 'Gateron', name: 'Magnetic Jade',        force: 30, travel: 3.5, source: 'gateron.com' },
+  { id: 'gateron_jade_max',    brand: 'Gateron', name: 'Magnetic Jade Max',    force: 36, travel: 3.5, source: 'gateron.com' },
+  { id: 'gateron_ks20',        brand: 'Gateron', name: 'KS-20 Magnetic White', force: 30, travel: 4.1, source: 'gateron.com' },
+  { id: 'geon_raw_he',         brand: 'Geon',    name: 'Raw HE',               force: 36, travel: 3.4, source: 'geon.works', note: 'also sold with 27gf and 45gf springs' },
+  { id: 'akko_cream_yellow_he',brand: 'Akko',    name: 'Cream Yellow HE',      force: 50, travel: 4.0, source: 'akkogear.eu (MOD 007B HE)' },
+];
+const SWITCH_BY_ID = new Map(SWITCHES.map(s => [s.id, s]));
+
+// Which physical switch is in each key. GLOBAL to the board (a switch is hardware; it does not
+// change with the 4 software configs) and local to this browser only - never written to the
+// keyboard or the backup JSON. Unknown ids are dropped so a stale/renamed id never sticks.
+const SWITCH_STORE_KEY = 'ae64-switch-assignments';
+const switchOf = new Map();  // rc -> switchId
+function loadSwitchAssignments() {
+  switchOf.clear();
+  try {
+    const raw = JSON.parse(localStorage.getItem(SWITCH_STORE_KEY) || '{}');
+    for (const [rc, id] of Object.entries(raw)) if (SWITCH_BY_ID.has(id)) switchOf.set(rc, id);
+  } catch (e) { /* private mode / cleared storage: start empty */ }
+}
+function saveSwitchAssignments() {
+  try { localStorage.setItem(SWITCH_STORE_KEY, JSON.stringify(Object.fromEntries(switchOf))); }
+  catch (e) { /* storage unavailable: keep in-memory only */ }
+}
+function setKeySwitch(rc, id, save = true) {
+  if (id && SWITCH_BY_ID.has(id)) switchOf.set(rc, id); else switchOf.delete(rc);
+  if (save) saveSwitchAssignments();   // save=false lets a multi-key loop write localStorage once
+}
+function clearKeySwitch(rc, save = true) { switchOf.delete(rc); if (save) saveSwitchAssignments(); }
+loadSwitchAssignments();  // SWITCH_BY_ID exists now, so unknown-id filtering works
 function renderRates() {
   pickRow(document.getElementById('rate'), RATES.length, rateSel, i => RATES[i], i => {
     rateSel = i;
@@ -3574,6 +3641,57 @@ async function setRemapLayer(n) {
   }
   renderRemap();
 }
+
+function switchSpecText(s) { return `${s.approx ? '≈' : ''}${s.force}g · ${s.travel}mm`; }
+
+// The Switches view: tag the picked key(s) with the physical switch in them (a local label only).
+function renderSwitchView() {
+  const listEl = document.getElementById('switchList');
+  if (!listEl) return;
+  const filter = document.getElementById('switchFilter').value.trim().toLowerCase();
+  const sel = [...selected];
+  const ids = new Set(sel.map(rc => switchOf.get(rc) || ''));
+  const curId = (sel.length && ids.size === 1) ? (switchOf.get(sel[0]) || null) : null;
+  const ro = document.getElementById('switchReadout');
+  if (!sel.length) ro.textContent = 'No keys picked. Click a key above, then a switch below.';
+  else if (ids.size > 1) ro.textContent = 'Picked keys have different switches.';
+  else { const s = SWITCH_BY_ID.get(curId); ro.textContent = s ? `Assigned: ${s.brand} ${s.name} (${switchSpecText(s)})` : 'Picked key(s) have no switch set.'; }
+
+  listEl.innerHTML = '';
+  const mkRow = (label, spec, on, onclick) => {
+    const b = document.createElement('button');
+    b.className = 'swrow' + (on ? ' on' : '');
+    const nm = document.createElement('span'); nm.textContent = label; b.appendChild(nm);
+    if (spec) { const sp = document.createElement('span'); sp.className = 'spec'; sp.textContent = spec; b.appendChild(sp); }
+    b.disabled = !sel.length; b.onclick = onclick;
+    return b;
+  };
+  // Clear row is highlighted only when every picked key is unassigned (ids.size===1 && !curId);
+  // with a mixed selection nothing is highlighted, matching the "different switches" readout.
+  const allUnset = !!sel.length && ids.size === 1 && !curId;
+  listEl.appendChild(mkRow('No switch (clear)', '', allUnset, () => { sel.forEach(rc => clearKeySwitch(rc, false)); saveSwitchAssignments(); afterSwitchChange(); }));
+  for (const s of SWITCHES) {
+    if (filter && !`${s.brand} ${s.name}`.toLowerCase().includes(filter)) continue;
+    listEl.appendChild(mkRow(`${s.brand} ${s.name}`, switchSpecText(s), s.id === curId, () => { sel.forEach(rc => setKeySwitch(rc, s.id, false)); saveSwitchAssignments(); afterSwitchChange(); }));
+  }
+}
+
+// Keycap badge: the brand on each assigned key, shown only while the Switches view is on screen.
+function paintSwitchTags() {
+  const on = !document.getElementById('view-switches').hidden;
+  document.getElementById('kb').classList.toggle('show-switch', on);
+  for (const [rc, el] of keyEl) {
+    const badge = el.querySelector('.swtag');
+    if (!badge) continue;
+    const s = on ? SWITCH_BY_ID.get(switchOf.get(rc)) : null;
+    badge.textContent = s ? s.brand : '';
+    // Only own the title while this view is on screen; off it, paintCaps/paintAdvTags own it
+    // (they run just before this in the nav handler) - clearing here would wipe their tooltips.
+    if (on) el.title = s ? `${s.brand} ${s.name} — ${switchSpecText(s)}` : '';
+  }
+}
+
+function afterSwitchChange() { renderSwitchView(); paintSwitchTags(); }
 
 // Synchronous on purpose: it draws from the cache, so it can run the instant the view is
 // shown and get the size right the first time.
@@ -5188,6 +5306,37 @@ if (location.search.includes('selftest')) {
     updateKbForView('traveltest');
     console.assert(selected.size === 0, 'switching tabs clears the selection so no stale keys carry over');
     updateKbForView('performance');
+  }
+  {
+    // Switch reference list: sane, unique, and the owner's two switches are present.
+    console.assert(SWITCHES.length >= 5, 'switch list is seeded');
+    console.assert(new Set(SWITCHES.map(s => s.id)).size === SWITCHES.length, 'switch ids are unique');
+    console.assert(SWITCHES.every(s => /^[a-z0-9_]+$/.test(s.id)), 'switch ids are clean slugs');
+    console.assert(SWITCHES.every(s => s.force > 0 && s.travel > 0), 'every switch has a positive force and travel');
+    console.assert(SWITCHES.every(s => s.approx || s.source), 'every switch number is sourced or flagged approx');
+    console.assert(SWITCH_BY_ID.get('ur_ice_ultra') && SWITCH_BY_ID.get('ttc_rgb_king_he'), 'the owner’s two switches are present');
+  }
+  {
+    // Per-key switch assignment round-trips through localStorage. Snapshot + restore the real
+    // value so running ?selftest never wipes a user's actual assignments.
+    const saved = (() => { try { return localStorage.getItem(SWITCH_STORE_KEY); } catch (e) { return null; } })();
+    const firstId = SWITCHES[0].id;
+    switchOf.clear();
+    setKeySwitch('2-2', firstId);
+    setKeySwitch('3-3', 'definitely_not_a_switch');   // unknown -> ignored
+    console.assert(switchOf.get('2-2') === firstId, 'a known switch assigns');
+    console.assert(!switchOf.has('3-3'), 'an unknown switch id is refused');
+    loadSwitchAssignments();                          // reload from storage
+    console.assert(switchOf.get('2-2') === firstId, 'assignment survives a reload');
+    clearKeySwitch('2-2'); loadSwitchAssignments();
+    console.assert(!switchOf.has('2-2'), 'clearing a key persists');
+    // save=false updates memory but leaves storage untouched, so a multi-key loop can write once.
+    const beforeBatch = (() => { try { return localStorage.getItem(SWITCH_STORE_KEY); } catch (e) { return null; } })();
+    setKeySwitch('4-4', firstId, false);
+    console.assert(switchOf.get('4-4') === firstId, 'save=false still updates the map');
+    console.assert((() => { try { return localStorage.getItem(SWITCH_STORE_KEY); } catch (e) { return null; } })() === beforeBatch, 'save=false does not write storage');
+    try { if (saved === null) localStorage.removeItem(SWITCH_STORE_KEY); else localStorage.setItem(SWITCH_STORE_KEY, saved); } catch (e) {}
+    loadSwitchAssignments();
   }
 
   console.log('selftest done');
