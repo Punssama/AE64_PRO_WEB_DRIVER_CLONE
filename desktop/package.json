@@ -1,7 +1,7 @@
 {
   "name": "ae64-pro-tuner-desktop",
   "productName": "AE64 Pro Tuner",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Desktop build of the AE64 Pro Hall-effect keyboard tuner - the web tool wrapped in Electron so it runs without a browser.",
   "author": "Punssama",
   "license": "MIT",
