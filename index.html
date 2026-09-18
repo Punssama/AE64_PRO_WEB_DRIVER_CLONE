@@ -445,15 +445,20 @@
   /* Calibration rewrites every key's stored axis data, so its screen is styled to be
      read before it is clicked, not after. */
   .warn { border: 2px solid var(--line); background: var(--accent); color: var(--on-accent); padding: 3px 8px; margin: 0 0 12px; }
-  /* Switches view: a filter box over a flat 8-bit list of switch rows. */
-  #switchFilter { width: 100%; box-sizing: border-box; padding: 5px 8px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 17px; margin: 0 0 10px; }
-  #switchList { display: flex; flex-direction: column; gap: 6px; }
-  .swrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; border: 2px solid var(--ink); background: #FFF6E6; color: var(--ink); font-family: var(--term); font-size: 18px; cursor: pointer; text-align: left; }
-  .swrow:hover { background: var(--accent); color: var(--on-accent); }
-  .swrow.on { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--ink); }
-  .swrow:disabled { opacity: .55; cursor: default; }
-  .swrow .spec { font-size: 14px; color: var(--muted); white-space: nowrap; }
-  .swrow:hover .spec, .swrow.on .spec { color: var(--on-accent); }
+  /* Switches view: a filter box over a responsive grid of switch tiles (drawn switch on top,
+     name + spec below), like the vendor's switch picker. var(--field) themes correctly in both
+     light and dark, unlike the flat #FFF6E6 an earlier pass used. */
+  #switchFilter { width: 100%; box-sizing: border-box; padding: 5px 8px; border: 2px solid var(--ink); background: var(--field); color: var(--ink); font-family: var(--term); font-size: 17px; margin: 0 0 10px; }
+  #switchList { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+  .swtile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 9px; border: 2px solid var(--ink); background: var(--field); color: var(--ink); font-family: var(--term); cursor: pointer; }
+  .swtile:hover { background: var(--accent); color: var(--on-accent); }
+  .swtile.on { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--ink); }
+  .swtile:disabled { opacity: .5; cursor: default; }
+  .swtile:disabled:hover { background: var(--field); color: var(--ink); }
+  .swtile .glyph { width: 54px; height: 54px; display: block; }
+  .swtile .nm { font-size: 15px; line-height: 1.06; text-align: center; }
+  .swtile .spec { font-size: 12px; color: var(--muted); }
+  .swtile:hover .spec, .swtile.on .spec { color: var(--on-accent); }
   /* Keycap switch badge - bottom-left so it never shares the RT chip's top-right corner, and
      only painted while the Switches view is on screen (see paintSwitchTags). */
   #kb .kb-key .swtag { position: absolute; left: 1px; bottom: 0; font-size: 9px; line-height: 1; font-family: var(--term); color: var(--muted); pointer-events: none; }
@@ -2001,14 +2006,17 @@ let rateSel = 3;
 // handles credentials. force = operating/initial force in grams; travel = total travel in mm.
 // Every number is sourced (see `source`); a value that could not be sourced would carry
 // approx:true and render with a "≈". Extend this array to add a switch - nothing else needs it.
+// color = housing colour, stem = centre-cross colour: a stylised approximation of each switch's
+// real colourway for the drawn glyph (see switchGlyph). Not a photo - product photos are
+// copyrighted, and this tool ships offline, so the art is generated, not fetched.
 const SWITCHES = [
-  { id: 'ur_ice_ultra',        brand: 'UR',      name: 'Ice Ultra',           force: 35, travel: 3.5, source: 'arbiterstudio.com' },
-  { id: 'ttc_rgb_king_he',     brand: 'TTC',     name: 'RGB King HE',          force: 35, travel: 3.5, source: 'ttcswitches.com / kbd.news' },
-  { id: 'gateron_jade',        brand: 'Gateron', name: 'Magnetic Jade',        force: 30, travel: 3.5, source: 'gateron.com' },
-  { id: 'gateron_jade_max',    brand: 'Gateron', name: 'Magnetic Jade Max',    force: 36, travel: 3.5, source: 'gateron.com' },
-  { id: 'gateron_ks20',        brand: 'Gateron', name: 'KS-20 Magnetic White', force: 30, travel: 4.1, source: 'gateron.com' },
-  { id: 'geon_raw_he',         brand: 'Geon',    name: 'Raw HE',               force: 36, travel: 3.4, source: 'geon.works', note: 'also sold with 27gf and 45gf springs' },
-  { id: 'akko_cream_yellow_he',brand: 'Akko',    name: 'Cream Yellow HE',      force: 50, travel: 4.0, source: 'akkogear.eu (MOD 007B HE)' },
+  { id: 'ur_ice_ultra',        brand: 'UR',      name: 'Ice Ultra',           force: 35, travel: 3.5, color: '#DCEFF7', stem: '#7FBFE0', source: 'arbiterstudio.com' },
+  { id: 'ttc_rgb_king_he',     brand: 'TTC',     name: 'RGB King HE',          force: 35, travel: 3.5, color: '#E7E7EE', stem: '#2A2A2A', source: 'ttcswitches.com / kbd.news' },
+  { id: 'gateron_jade',        brand: 'Gateron', name: 'Magnetic Jade',        force: 30, travel: 3.5, color: '#2FB894', stem: '#0F2E26', source: 'gateron.com' },
+  { id: 'gateron_jade_max',    brand: 'Gateron', name: 'Magnetic Jade Max',    force: 36, travel: 3.5, color: '#1E9C86', stem: '#0B241E', source: 'gateron.com' },
+  { id: 'gateron_ks20',        brand: 'Gateron', name: 'KS-20 Magnetic White', force: 30, travel: 4.1, color: '#F2F2F2', stem: '#BFC4C2', source: 'gateron.com' },
+  { id: 'geon_raw_he',         brand: 'Geon',    name: 'Raw HE',               force: 36, travel: 3.4, color: '#6E6E6E', stem: '#262626', source: 'geon.works', note: 'also sold with 27gf and 45gf springs' },
+  { id: 'akko_cream_yellow_he',brand: 'Akko',    name: 'Cream Yellow HE',      force: 50, travel: 4.0, color: '#F3E6B4', stem: '#E7C64A', source: 'akkogear.eu (MOD 007B HE)' },
 ];
 const SWITCH_BY_ID = new Map(SWITCHES.map(s => [s.id, s]));
 
@@ -3644,6 +3652,22 @@ async function setRemapLayer(n) {
 
 function switchSpecText(s) { return `${s.approx ? '≈' : ''}${s.force}g · ${s.travel}mm`; }
 
+// A drawn, top-down switch: dark plate, coloured housing, centre cross. Stylised (not a photo -
+// product photos are copyrighted and this tool ships offline), tinted to each switch's colourway.
+function switchGlyph(s) {
+  const housing = (s && s.color) || '#8AA79B', stem = (s && s.stem) || '#20342C';
+  return `<svg class="glyph" viewBox="0 0 64 64" aria-hidden="true">`
+    + `<rect x="5" y="5" width="54" height="54" rx="4" fill="#12241F"/>`
+    + `<rect x="14" y="14" width="36" height="36" rx="3" fill="${housing}" stroke="rgba(0,0,0,.35)" stroke-width="2"/>`
+    + `<path d="M29 19h6v10h10v6h-10v10h-6v-10h-10v-6h10z" fill="${stem}"/></svg>`;
+}
+function clearGlyph() {
+  return `<svg class="glyph" viewBox="0 0 64 64" aria-hidden="true">`
+    + `<rect x="5" y="5" width="54" height="54" rx="4" fill="#12241F"/>`
+    + `<rect x="14" y="14" width="36" height="36" rx="3" fill="none" stroke="#6E8A7E" stroke-width="2" stroke-dasharray="4 3"/>`
+    + `<line x1="20" y1="44" x2="44" y2="20" stroke="#6E8A7E" stroke-width="2"/></svg>`;
+}
+
 // The Switches view: tag the picked key(s) with the physical switch in them (a local label only).
 function renderSwitchView() {
   const listEl = document.getElementById('switchList');
@@ -3658,21 +3682,27 @@ function renderSwitchView() {
   else { const s = SWITCH_BY_ID.get(curId); ro.textContent = s ? `Assigned: ${s.brand} ${s.name} (${switchSpecText(s)})` : 'Picked key(s) have no switch set.'; }
 
   listEl.innerHTML = '';
-  const mkRow = (label, spec, on, onclick) => {
+  const mkTile = (glyph, name, spec, on, aria, onclick) => {
     const b = document.createElement('button');
-    b.className = 'swrow' + (on ? ' on' : '');
-    const nm = document.createElement('span'); nm.textContent = label; b.appendChild(nm);
-    if (spec) { const sp = document.createElement('span'); sp.className = 'spec'; sp.textContent = spec; b.appendChild(sp); }
+    b.className = 'swtile' + (on ? ' on' : '');
+    b.innerHTML = glyph + '<span class="nm"></span>' + (spec ? '<span class="spec"></span>' : '');
+    b.querySelector('.nm').textContent = name;
+    if (spec) b.querySelector('.spec').textContent = spec;
     b.disabled = !sel.length; b.onclick = onclick;
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.setAttribute('aria-label', aria);
     return b;
   };
-  // Clear row is highlighted only when every picked key is unassigned (ids.size===1 && !curId);
+  // Clear tile is highlighted only when every picked key is unassigned (ids.size===1 && !curId);
   // with a mixed selection nothing is highlighted, matching the "different switches" readout.
   const allUnset = !!sel.length && ids.size === 1 && !curId;
-  listEl.appendChild(mkRow('No switch (clear)', '', allUnset, () => { sel.forEach(rc => clearKeySwitch(rc, false)); saveSwitchAssignments(); afterSwitchChange(); }));
+  listEl.appendChild(mkTile(clearGlyph(), 'No switch', '', allUnset, 'No switch (clear the assignment)',
+    () => { sel.forEach(rc => clearKeySwitch(rc, false)); saveSwitchAssignments(); afterSwitchChange(); }));
   for (const s of SWITCHES) {
     if (filter && !`${s.brand} ${s.name}`.toLowerCase().includes(filter)) continue;
-    listEl.appendChild(mkRow(`${s.brand} ${s.name}`, switchSpecText(s), s.id === curId, () => { sel.forEach(rc => setKeySwitch(rc, s.id, false)); saveSwitchAssignments(); afterSwitchChange(); }));
+    listEl.appendChild(mkTile(switchGlyph(s), `${s.brand} ${s.name}`, switchSpecText(s), s.id === curId,
+      `${s.brand} ${s.name}, ${switchSpecText(s)}`,
+      () => { sel.forEach(rc => setKeySwitch(rc, s.id, false)); saveSwitchAssignments(); afterSwitchChange(); }));
   }
 }
 
